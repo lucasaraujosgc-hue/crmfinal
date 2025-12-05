@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search, Filter,
   CheckCircle2, AlertCircle, Send, RefreshCw, Megaphone, BookOpen, Plus, Power, Trash2, Terminal,
-  Briefcase, AlertTriangle, MessageSquare, User, MoreVertical, Paperclip, Smile, Play, FileText, X, Save, Mic
+  Briefcase, AlertTriangle, MessageSquare, User, MoreVertical, Paperclip, Smile, Play, FileText, X, Save, Mic,
+  BarChart3
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
@@ -20,7 +20,7 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
-      console.error(error);
+      console.warn(error);
       return initialValue;
     }
   });
@@ -33,985 +33,911 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
         window.localStorage.setItem(key, JSON.stringify(valueToStore));
       }
     } catch (error) {
-      console.error(error);
+      console.warn(error);
     }
   };
-
   return [storedValue, setValue];
 }
 
-// --- Components ---
-
-const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed }: { icon: any, label: string, active: boolean, onClick: () => void, collapsed: boolean }) => (
-  <button
-    onClick={onClick}
-    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-all duration-200 rounded-xl mb-1
-      ${active 
-        ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/20' 
-        : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-      }
-      ${collapsed ? 'justify-center px-2' : ''}
-    `}
-  >
-    <Icon size={20} className={active ? 'text-white' : 'text-slate-400'} />
-    {!collapsed && <span>{label}</span>}
-    {active && !collapsed && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />}
-  </button>
-);
-
-const StatCard = ({ title, value, icon: Icon, trend, color }: any) => (
-  <div className="relative overflow-hidden bg-white border border-slate-100 p-6 rounded-2xl shadow-[0_2px_20px_-4px_rgba(0,0,0,0.05)] group hover:-translate-y-1 transition-all duration-300">
-    <div className={`absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity ${color}`}>
-      <Icon size={64} />
-    </div>
-    <div className="relative z-10">
-      <div className="flex items-center gap-3 mb-2">
-        <div className={`p-2 rounded-lg ${color} bg-opacity-10`}>
-          <Icon size={20} className={color.replace('bg-', 'text-')} />
-        </div>
-        <h3 className="text-sm font-medium text-slate-500">{title}</h3>
-      </div>
-      <p className="text-3xl font-bold text-slate-800">{value}</p>
-      {trend && (
-        <p className="flex items-center gap-1 mt-2 text-xs font-medium text-emerald-600 bg-emerald-50 w-fit px-2 py-1 rounded-full">
-          <span className="text-emerald-500">↑</span> {trend} vs último mês
-        </p>
-      )}
-    </div>
-  </div>
-);
+function useInterval(callback: () => void, delay: number | null) {
+  const savedCallback = useRef(callback);
+  useEffect(() => { savedCallback.current = callback; }, [callback]);
+  useEffect(() => {
+    if (delay !== null) {
+      const id = setInterval(() => savedCallback.current(), delay);
+      return () => clearInterval(id);
+    }
+  }, [delay]);
+}
 
 // --- Main App Component ---
 
-export default function App() {
+const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
-  // Data State
+  // Data States
   const [companies, setCompanies] = useState<CompanyResult[]>([]);
-  const [knowledgeRules, setKnowledgeRules] = useLocalStorage<KnowledgeRule[]>('crm_rules_v3', []);
+  const [imports, setImports] = useState<ImportBatch[]>([]);
+  const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+
+  // Filters State
+  const [filters, setFilters] = useState({
+    search: '',
+    city: '',
+    reason: '',
+    hasAccountant: 'all', // all, yes, no
+    status: 'all',
+    hasPhone: 'all'
+  });
+  
+  // Filter Options (Fetched from API)
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [availableReasons, setAvailableReasons] = useState<string[]>([]);
+
+  // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
     model: 'gemini-2.5-flash',
     persona: DEFAULT_AI_PERSONA,
-    knowledgeRules: [],
+    knowledgeRules: DEFAULT_KNOWLEDGE_RULES,
     temperature: 0.7,
-    aiActive: false
+    aiActive: true
   });
-  const [initialMessage, setInitialMessage] = useLocalStorage<string>('crm_initial_msg', 'Olá, tudo bem?');
-  
+  const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
+
   // WhatsApp State
   const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
   const [chats, setChats] = useState<any[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [messageInput, setMessageInput] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [newMessage, setNewMessage] = useState('');
 
-  // API Integration State
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
-  const [processingStatus, setProcessingStatus] = useState<string>('');
-  const [imports, setImports] = useState<ImportBatch[]>([]);
-
-  // Metadata Filters
-  const [uniqueMotivos, setUniqueMotivos] = useState<string[]>([]);
-  const [uniqueMunicipios, setUniqueMunicipios] = useState<string[]>([]);
-
-  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
-  
-  // Filters State
-  const [campaignFilter, setCampaignFilter] = useState<CampaignStatus | 'all'>('all');
-  const [campaignReasonFilter, setCampaignReasonFilter] = useState<string>('all');
-  const [campaignCityFilter, setCampaignCityFilter] = useState<string>('all');
-  const [campaignAccountantFilter, setCampaignAccountantFilter] = useState<'all' | 'with' | 'without'>('all');
-  
-  // Company Base Filters
-  const [baseSearch, setBaseSearch] = useState('');
-  const [baseCityFilter, setBaseCityFilter] = useState('all');
-  const [baseReasonFilter, setBaseReasonFilter] = useState('all');
-  const [baseAccountantFilter, setBaseAccountantFilter] = useState('all');
-  
-  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
-
-  // --- Initial Data Load ---
+  // Initial Load
   useEffect(() => {
     fetchCompanies();
-    fetchMetadata();
     fetchImports();
-    syncRulesWithServer(); // Initial sync
+    fetchFilters();
   }, []);
 
-  // --- Optimized Polling (WhatsApp) ---
+  // Polling WhatsApp status & Chats
+  useInterval(() => {
+    fetchWhatsAppStatus();
+    if (activeTab === 'whatsapp' && waSession.status === 'connected') {
+      fetchChats();
+      if (activeChat) fetchMessages(activeChat);
+    }
+  }, 3000);
+
+  // Sync AI Rules with Backend
   useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch('/api/whatsapp/status');
+    fetch('/api/config/ai-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: aiConfig.knowledgeRules })
+    }).catch(console.error);
+  }, [aiConfig.knowledgeRules]);
+
+  // --- API Calls ---
+
+  const fetchFilters = async () => {
+    try {
+      const res = await fetch('/api/unique-filters');
+      if (res.ok) {
         const data = await res.json();
-        
-        setWaSession(prev => {
-            if (prev.status !== data.status || prev.qrCode !== data.qr) {
-                return { status: data.status, qrCode: data.qr };
-            }
-            return prev;
-        });
-
-        // Only fetch chat list if connected and on Chat tab
-        if (data.status === 'connected' && activeTab === 'chat') {
-            const chatRes = await fetch('/api/whatsapp/chats');
-            const chatData = await chatRes.json();
-            // Basic compare to avoid re-renders if same
-            setChats(prev => {
-                if (prev.length !== chatData.length) return chatData;
-                // If the first chat changed time, update
-                if (prev[0]?.timestamp !== chatData[0]?.timestamp) return chatData;
-                return prev;
-            });
-        }
-      } catch (e) {
-        console.error("Polling Error", e);
+        setAvailableCities(data.municipios || []);
+        setAvailableReasons(data.motivos || []);
       }
-    }, 4000); 
-    return () => clearInterval(interval);
-  }, [activeTab]);
-
-  // --- Optimized Polling (Messages) ---
-  useEffect(() => {
-    if (!activeChat || activeTab !== 'chat') return;
-
-    const fetchMessages = async () => {
-        try {
-            const res = await fetch(`/api/whatsapp/messages/${activeChat}`);
-            const data = await res.json();
-            setMessages(prev => {
-                // If different length or last message ID differs
-                if (prev.length !== data.length || prev[prev.length-1]?.id !== data[data.length-1]?.id) {
-                    return data;
-                }
-                return prev;
-            });
-        } catch (e) {
-            console.error("Message Error", e);
-        }
-    };
-
-    fetchMessages();
-    const interval = setInterval(fetchMessages, 2500); // Faster polling for live chat
-    return () => clearInterval(interval);
-  }, [activeChat, activeTab]);
-
-  // Scroll to bottom only when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, activeChat]);
-
-  // --- Actions ---
+    } catch (e) { console.error(e); }
+  };
 
   const fetchCompanies = async () => {
+    setIsLoadingCompanies(true);
     try {
       const res = await fetch('/get-all-results');
       if (res.ok) {
         const data = await res.json();
         setCompanies(data);
+        
+        // Calc Stats
+        const success = data.filter((c: any) => c.status === 'Sucesso' || c.status === Status.SUCCESS).length;
+        const errors = data.filter((c: any) => c.status !== 'Sucesso' && c.status !== Status.SUCCESS).length;
+        setStats({ total: data.length, processed: data.length, success, errors });
       }
     } catch (error) {
-      console.error("Falha ao buscar empresas:", error);
+      console.error("Failed to fetch companies", error);
+    } finally {
+      setIsLoadingCompanies(false);
     }
-  };
-
-  const fetchMetadata = async () => {
-      try {
-          const res = await fetch('/api/unique-filters');
-          if (res.ok) {
-              const data = await res.json();
-              setUniqueMotivos(data.motivos || []);
-              setUniqueMunicipios(data.municipios || []);
-          }
-      } catch (e) { console.error(e); }
   };
 
   const fetchImports = async () => {
-      try {
-          const res = await fetch('/get-imports');
-          if (res.ok) setImports(await res.json());
-      } catch (e) { console.error(e); }
-  };
-
-  const syncRulesWithServer = async () => {
-      try {
-        await fetch('/api/config/ai-rules', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rules: knowledgeRules })
-        });
-      } catch (e) {
-          console.error("Erro ao sincronizar regras", e);
-      }
-  };
-
-  // SSE Listener for Progress
-  useEffect(() => {
-    if (!currentProcessId || !isProcessing) return;
-
-    const eventSource = new EventSource(`/progress/${currentProcessId}`);
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.status === 'not_found') return;
-
-        const percent = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
-        setUploadProgress(percent);
-        setProcessingStatus(`Processando... ${data.processed} de ${data.total}`);
-
-        if (data.status === 'completed' || data.status === 'error') {
-          setIsProcessing(false);
-          eventSource.close();
-          fetchCompanies();
-          fetchImports();
-          fetchMetadata(); // Update filters with new data
-          alert(data.status === 'completed' ? "Processamento concluído!" : "Processamento finalizou com erros.");
-        }
-      } catch (e) { console.error(e); }
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [currentProcessId, isProcessing]);
-
-  // --- Handlers ---
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
-      setIsProcessing(true);
-      setUploadProgress(0);
-      setProcessingStatus('Iniciando upload...');
-
-      const res = await fetch('/start-processing', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
-      const data = await res.json();
-      setCurrentProcessId(data.processId);
-      
-    } catch (error) {
-      console.error("Erro no upload:", error);
-      setIsProcessing(false);
-      alert("Erro ao enviar arquivo.");
-    }
+      const res = await fetch('/get-imports');
+      if (res.ok) setImports(await res.json());
+    } catch (e) { console.error(e); }
   };
 
-  const handleReprocess = async (processId: string) => {
-      if (!confirm("Deseja reprocessar este lote? O sistema irá consultar a SEFAZ novamente para todas as IEs.")) return;
-      try {
-          setIsProcessing(true);
-          setUploadProgress(0);
-          setProcessingStatus('Reiniciando processamento...');
-          const res = await fetch(`/reprocess/${processId}`, { method: 'POST' });
-          if (!res.ok) throw new Error('Falha');
-          setCurrentProcessId(processId); // Start listening to progress
-      } catch (e) {
-          setIsProcessing(false);
-          alert('Erro ao iniciar reprocessamento');
+  const fetchWhatsAppStatus = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/status');
+      if (res.ok) {
+        const data = await res.json();
+        setWaSession({ status: data.status, qrCode: data.qr });
       }
+    } catch (e) { console.error(e); }
   };
 
-  const toggleAiActive = () => {
-    setAiConfig(prev => ({ ...prev, aiActive: !prev.aiActive }));
+  const fetchChats = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/chats');
+      if (res.ok) setChats(await res.json());
+    } catch (e) { console.error(e); }
   };
 
-  const toggleChatAi = async (chatId: string, currentStatus: boolean) => {
-      try {
-          await fetch('/api/whatsapp/toggle-ai', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chatId, active: !currentStatus })
-          });
-          setChats(prev => prev.map(c => c.id === chatId ? { ...c, isAiDisabled: currentStatus } : c));
-      } catch (e) {
-          console.error("Erro ao alternar IA", e);
-      }
+  const fetchMessages = async (chatId: string) => {
+    try {
+      const res = await fetch(`/api/whatsapp/messages/${chatId}`);
+      if (res.ok) setChatMessages(await res.json());
+    } catch (e) { console.error(e); }
   };
 
   const sendMessage = async () => {
-      if (!messageInput.trim() || !activeChat) return;
-      try {
-          // Optimistic UI update
-          setMessages(prev => [...prev, {
-              id: 'temp-' + Date.now(),
-              fromMe: true,
-              body: messageInput,
-              timestamp: Date.now() / 1000
-          }]);
-          
-          await fetch('/api/whatsapp/send', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chatId: activeChat, message: messageInput })
-          });
-          setMessageInput('');
-      } catch (e) {
-          console.error("Erro ao enviar", e);
+    if (!activeChat || !newMessage.trim()) return;
+    try {
+      setChatMessages(prev => [...prev, { id: 'temp-'+Date.now(), fromMe: true, body: newMessage, timestamp: Date.now()/1000 }]);
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: activeChat, message: newMessage })
+      });
+      if (res.ok) {
+        setNewMessage('');
+        fetchMessages(activeChat);
       }
+    } catch (e) { console.error(e); }
   };
 
-  // Rule Management Handlers
-  const addInstruction = (ruleId: string, type: 'simple' | 'flow') => {
-      setKnowledgeRules(prev => prev.map(r => {
-          if (r.id === ruleId) {
-              const newInst: Instruction = {
-                  id: Date.now().toString(),
-                  title: 'Nova Instrução',
-                  type,
-                  content: ''
-              };
-              return { ...r, instructions: [...(r.instructions || []), newInst]};
-          }
-          return r;
-      }));
+  const toggleAIChat = async (chatId: string, currentStatus: boolean) => {
+    try {
+      const res = await fetch('/api/whatsapp/toggle-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, active: !currentStatus })
+      });
+      if (res.ok) fetchChats();
+    } catch (e) { console.error(e); }
   };
 
-  const updateInstruction = (ruleId: string, instId: string, field: keyof Instruction, val: string) => {
-      setKnowledgeRules(prev => prev.map(r => {
-          if (r.id === ruleId) {
-              return {
-                  ...r,
-                  instructions: r.instructions.map(i => i.id === instId ? { ...i, [field]: val } : i)
-              };
-          }
-          return r;
-      }));
-  };
-
-  const removeInstruction = (ruleId: string, instId: string) => {
-      setKnowledgeRules(prev => prev.map(r => {
-          if (r.id === ruleId) {
-              return { ...r, instructions: r.instructions.filter(i => i.id !== instId) };
-          }
-          return r;
-      }));
-  };
-
-  // --- Views ---
-
-  const DashboardView = () => {
-      const stats = useMemo(() => ({
-          total: companies.length,
-          success: companies.filter(c => c.status === 'Sucesso').length,
-          pending: companies.filter(c => !c.campaignStatus || c.campaignStatus === CampaignStatus.PENDING).length,
-          contacted: companies.filter(c => c.campaignStatus && c.campaignStatus !== CampaignStatus.PENDING).length,
-      }), [companies]);
-
-      return (
-        <div className="space-y-6 animate-fade-in">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Dashboard Geral</h1>
-            <p className="text-slate-500">Visão geral da sua operação.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatCard title="Total de Empresas" value={stats.total} icon={Briefcase} color="text-blue-600 bg-blue-600" trend="+12%" />
-            <StatCard title="Empresas Contatadas" value={stats.contacted} icon={Megaphone} color="text-violet-600 bg-violet-600" trend="+5%" />
-            <StatCard title="Leads (Respostas)" value={companies.filter(c => c.campaignStatus === CampaignStatus.REPLIED).length} icon={MessageCircle} color="text-emerald-600 bg-emerald-600" trend="+8%" />
-            <StatCard title="Taxa de Inaptidão" value={stats.total > 0 ? "100%" : "0%"} icon={AlertTriangle} color="text-rose-600 bg-rose-600" />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 card-premium p-6">
-              <h3 className="text-lg font-bold text-slate-800 mb-6">Funil de Campanhas</h3>
-              <div className="h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[
-                    { name: 'Pendentes', value: stats.pending },
-                    { name: 'Enviadas', value: companies.filter(c => c.campaignStatus === CampaignStatus.SENT).length },
-                    { name: 'Entregues', value: companies.filter(c => c.campaignStatus === CampaignStatus.DELIVERED).length },
-                    { name: 'Respondidas', value: companies.filter(c => c.campaignStatus === CampaignStatus.REPLIED).length },
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                    <YAxis axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} cursor={{ fill: '#f8fafc' }} />
-                    <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={50} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <div className="card-premium p-6">
-              <h3 className="text-lg font-bold text-slate-800 mb-6">Status da IA</h3>
-              <div className="flex flex-col items-center justify-center h-64 text-center">
-                 <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-4 transition-all duration-500 ${aiConfig.aiActive ? 'bg-emerald-100 text-emerald-600 shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'bg-slate-100 text-slate-400'}`}>
-                   <Bot size={48} />
-                 </div>
-                 <h4 className="text-xl font-bold text-slate-800 mb-1">{aiConfig.aiActive ? 'IA Ativa' : 'IA Pausada'}</h4>
-                 <p className="text-sm text-slate-500 mb-6">{aiConfig.aiActive ? 'O bot está respondendo os clientes.' : 'O bot não enviará mensagens.'}</p>
-                 <button onClick={toggleAiActive} className={`btn-base w-full ${aiConfig.aiActive ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-500/30'}`}>
-                   {aiConfig.aiActive ? 'Desativar IA' : 'Ativar IA Agora'}
-                 </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-  };
-
-  const ImportView = () => (
-    <div className="max-w-6xl mx-auto animate-slide-up pb-10">
-      <div className="text-center mb-8">
-        <h2 className="text-3xl font-bold text-slate-800 mb-2">Central de Importação</h2>
-        <p className="text-slate-500">Arraste seu PDF ou gerencie importações anteriores.</p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Upload Area */}
-          <div className="card-premium p-8 text-center flex flex-col justify-center">
-            <div className="border-3 border-dashed border-slate-200 rounded-3xl p-10 hover:border-brand-500 hover:bg-brand-50/30 transition-all duration-300 relative group cursor-pointer">
-                <input type="file" accept=".pdf" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
-                <div className="w-20 h-20 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                    <Upload size={32} />
-                </div>
-                <h3 className="text-xl font-bold text-slate-800">Nova Importação</h3>
-                <p className="text-slate-400">PDF da SEFAZ</p>
-                <div className="mt-6 inline-flex btn-primary pointer-events-none">Selecionar Arquivo</div>
-            </div>
-            
-            {isProcessing && (
-                <div className="mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="flex justify-between text-xs font-bold text-brand-600 mb-2">
-                        <span>{processingStatus}</span>
-                        <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                        <div className="h-full bg-brand-500 transition-all duration-300 relative overflow-hidden" style={{ width: `${uploadProgress}%` }}>
-                             <div className="absolute inset-0 bg-white/30 w-full h-full animate-[shimmer_1s_infinite_-45deg]"></div>
-                        </div>
-                    </div>
-                </div>
-            )}
-          </div>
-
-          {/* History List */}
-          <div className="card-premium p-6 overflow-hidden flex flex-col h-[500px]">
-              <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                      <FileText size={18} className="text-brand-600" /> Histórico de Lotes
-                  </h3>
-                  <button onClick={fetchImports} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><RefreshCw size={14}/></button>
-              </div>
-              
-              <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
-                  {imports.length === 0 && <div className="text-center text-slate-400 mt-10">Nenhum histórico encontrado.</div>}
-                  {imports.map(batch => (
-                      <div key={batch.id} className="p-4 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors flex justify-between items-center group">
-                          <div>
-                              <div className="font-medium text-slate-800 flex items-center gap-2">
-                                  {batch.filename}
-                              </div>
-                              <div className="text-xs text-slate-400 mt-1 flex gap-2">
-                                  <span>{new Date(batch.date).toLocaleDateString()} {new Date(batch.date).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}</span>
-                                  <span>•</span>
-                                  <span>{batch.total} registros</span>
-                              </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                              <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-full ${batch.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : batch.status === 'processing' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>
-                                  {batch.status === 'completed' ? 'Concluído' : batch.status === 'processing' ? 'Processando' : 'Erro'}
-                              </span>
-                              <button 
-                                onClick={() => handleReprocess(batch.id)} 
-                                className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100" 
-                                title="Reprocessar na SEFAZ"
-                              >
-                                  <Play size={16} />
-                              </button>
-                          </div>
-                      </div>
-                  ))}
-              </div>
-          </div>
-      </div>
-    </div>
-  );
-
-  const CampaignView = () => {
-    // Advanced Filtering Logic
-    const filteredCompanies = companies.filter(c => {
-      const statusMatch = campaignFilter === 'all' || (c.campaignStatus || CampaignStatus.PENDING) === campaignFilter;
-      const reasonMatch = campaignReasonFilter === 'all' || c.motivoSituacao === campaignReasonFilter;
-      const cityMatch = campaignCityFilter === 'all' || c.municipio === campaignCityFilter;
-      const accMatch = campaignAccountantFilter === 'all' || 
-                       (campaignAccountantFilter === 'with' ? !!c.nomeContador : !c.nomeContador);
-      return statusMatch && reasonMatch && cityMatch && accMatch;
-    });
-
-    const toggleSelectAll = () => {
-        if (selectedCompanies.length === filteredCompanies.length) setSelectedCompanies([]);
-        else setSelectedCompanies(filteredCompanies.map(c => c.id));
-    };
-
-    const toggleSelectCompany = (id: string) => {
-        setSelectedCompanies(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
-    };
-
-    return (
-      <div className="h-full flex flex-col gap-6 animate-fade-in">
-        <div className="flex justify-between items-start">
-          <div><h2 className="text-2xl font-bold text-slate-800">Campanhas</h2><p className="text-slate-500">Filtre e dispare mensagens.</p></div>
-          <div className="flex items-center gap-4 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
-             <span className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold ${aiConfig.aiActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}><Bot size={16} />{aiConfig.aiActive ? 'IA Ativa' : 'IA Pausada'}</span>
-             <label className="relative inline-flex items-center cursor-pointer"><input type="checkbox" checked={aiConfig.aiActive} onChange={toggleAiActive} className="sr-only peer" /><div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div></label>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full min-h-0">
-          <div className="lg:col-span-1 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2">
-            <div className="card-premium p-5 space-y-4">
-                <h3 className="font-bold text-slate-800 flex gap-2"><Filter size={18}/> Filtros Avançados</h3>
-                
-                <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Status Campanha</label>
-                    <select className="input-premium text-sm" value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value as any)}>
-                        <option value="all">Todos</option><option value={CampaignStatus.PENDING}>Pendentes</option><option value={CampaignStatus.SENT}>Enviados</option><option value={CampaignStatus.REPLIED}>Respondidos</option>
-                    </select>
-                </div>
-
-                <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Cidade</label>
-                    <select className="input-premium text-sm" value={campaignCityFilter} onChange={(e) => setCampaignCityFilter(e.target.value)}>
-                        <option value="all">Todas as Cidades</option>
-                        {uniqueMunicipios.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                </div>
-
-                <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Contador</label>
-                    <select className="input-premium text-sm" value={campaignAccountantFilter} onChange={(e) => setCampaignAccountantFilter(e.target.value as any)}>
-                        <option value="all">Todos</option><option value="with">Com Contador</option><option value="without">Sem Contador</option>
-                    </select>
-                </div>
-
-                <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Motivo Inaptidão</label>
-                    <select className="input-premium text-sm" value={campaignReasonFilter} onChange={(e) => setCampaignReasonFilter(e.target.value)}>
-                        <option value="all">Todos os Motivos</option>
-                        {uniqueMotivos.map(m => <option key={m} value={m} title={m}>{m.length > 30 ? m.substring(0,30)+'...' : m}</option>)}
-                    </select>
-                </div>
-            </div>
-
-            <div className="card-premium p-5 flex-1 flex flex-col bg-brand-50 border-brand-100">
-                <h3 className="font-bold text-brand-800 mb-2 flex items-center gap-2"><Send size={18}/> Disparo</h3>
-                <div className="flex-1">
-                    <label className="text-xs font-semibold text-brand-600 uppercase mb-1 block">Mensagem Inicial</label>
-                    <textarea 
-                        className="w-full h-32 p-3 rounded-xl border border-brand-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none bg-white"
-                        value={initialMessage}
-                        onChange={(e) => setInitialMessage(e.target.value)}
-                        placeholder="Olá, vi que sua empresa..."
-                    />
-                </div>
-                <div className="mt-4 pt-4 border-t border-brand-200">
-                    <div className="flex justify-between items-center mb-3">
-                        <span className="text-sm font-bold text-brand-700">Selecionados:</span>
-                        <span className="bg-white px-2 py-1 rounded-lg text-brand-600 font-bold border border-brand-200">{selectedCompanies.length}</span>
-                    </div>
-                    <button className="btn-primary w-full text-sm" disabled={selectedCompanies.length === 0} onClick={() => alert('Campanha iniciada!')}>
-                        Iniciar Disparos
-                    </button>
-                </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-3 card-premium flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <input type="checkbox" className="w-5 h-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" 
-                    checked={filteredCompanies.length > 0 && selectedCompanies.length === filteredCompanies.length} onChange={toggleSelectAll} />
-                <span className="text-sm font-semibold text-slate-600">Selecionar Todos ({filteredCompanies.length})</span>
-              </div>
-            </div>
-            <div className="overflow-auto flex-1 custom-scrollbar p-0">
-              <table className="w-full text-left border-collapse">
-                  <thead className="bg-white sticky top-0 z-10 shadow-sm">
-                      <tr>
-                          <th className="p-4 w-12"></th>
-                          <th className="p-4 text-xs font-bold text-slate-400 uppercase">Empresa</th>
-                          <th className="p-4 text-xs font-bold text-slate-400 uppercase">Motivo</th>
-                          <th className="p-4 text-xs font-bold text-slate-400 uppercase">Local</th>
-                          <th className="p-4 text-xs font-bold text-slate-400 uppercase">Status</th>
-                      </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filteredCompanies.map((company) => (
-                      <tr key={company.id} className={`hover:bg-slate-50 transition-colors cursor-pointer ${selectedCompanies.includes(company.id) ? 'bg-brand-50/50' : ''}`} onClick={() => toggleSelectCompany(company.id)}>
-                        <td className="p-4 w-12">
-                          <input type="checkbox" className="w-5 h-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500 cursor-pointer" checked={selectedCompanies.includes(company.id)} readOnly />
-                        </td>
-                        <td className="p-4">
-                          <div className="font-semibold text-slate-800 text-sm">{company.razaoSocial}</div>
-                          <div className="text-xs text-slate-400 mt-0.5">{company.nomeContador ? `Contador: ${company.nomeContador}` : 'Sem contador vinculado'}</div>
-                        </td>
-                        <td className="p-4"><div className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded max-w-[200px] truncate" title={company.motivoSituacao}>{company.motivoSituacao}</div></td>
-                        <td className="p-4"><div className="text-sm text-slate-600">{company.municipio}</div></td>
-                        <td className="p-4">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide
-                            ${company.campaignStatus === CampaignStatus.REPLIED ? 'bg-emerald-100 text-emerald-700' :
-                              company.campaignStatus === CampaignStatus.SENT ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
-                            {company.campaignStatus || 'PENDENTE'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const KnowledgeBaseView = () => {
-    const selectedRule = knowledgeRules.find(r => r.id === selectedRuleId);
-
-    const createRuleFromMotivo = (motivo: string) => {
-        if (knowledgeRules.some(r => r.motivoSituacao === motivo)) {
-            alert('Já existe uma regra para este motivo.');
-            return;
-        }
-        const newRule: KnowledgeRule = {
-            id: Date.now().toString(),
-            motivoSituacao: motivo,
-            instructions: [],
-            isActive: true
-        };
-        setKnowledgeRules(prev => [...prev, newRule]);
-        setSelectedRuleId(newRule.id);
-    };
-
-    return (
-      <div className="h-full flex flex-col gap-6 animate-fade-in">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800">Base de Conhecimento</h2>
-            <p className="text-slate-500">Gerencie as instruções da IA por contexto.</p>
-          </div>
-          <div className="flex gap-3">
-              <button className="btn-primary" onClick={syncRulesWithServer}>
-                  <Save size={18} /> Salvar Alterações
-              </button>
-              <div className="relative group">
-                  <button className="btn-secondary">
-                      <Plus size={18} /> Novo Contexto
-                  </button>
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl hidden group-hover:block z-50 p-2">
-                      <div className="text-xs font-bold text-slate-400 px-2 py-2 border-b border-slate-100">MOTIVOS ENCONTRADOS NO BANCO</div>
-                      <div className="max-h-64 overflow-y-auto custom-scrollbar pt-2">
-                          {uniqueMotivos.map(m => (
-                              <button key={m} onClick={() => createRuleFromMotivo(m)} className="w-full text-left px-3 py-2 text-xs hover:bg-brand-50 hover:text-brand-700 rounded-lg truncate transition-colors mb-1">
-                                  {m}
-                              </button>
-                          ))}
-                          {uniqueMotivos.length === 0 && <div className="text-xs text-center text-slate-400 py-4">Nenhum motivo encontrado.</div>}
-                      </div>
-                  </div>
-              </div>
-          </div>
-        </div>
-
-        <div className="flex gap-6 h-full min-h-0">
-          <div className="w-80 flex flex-col bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-             <div className="p-4 bg-slate-50 border-b border-slate-100"><span className="text-xs font-bold text-slate-400">REGRAS ATIVAS</span></div>
-             <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-               {knowledgeRules.map(rule => (
-                 <button key={rule.id} onClick={() => setSelectedRuleId(rule.id)}
-                   className={`w-full text-left p-3 rounded-xl transition-all duration-200 border ${selectedRuleId === rule.id ? 'bg-brand-50 border-brand-200 text-brand-700 shadow-sm' : 'hover:bg-slate-50 text-slate-600 border-transparent'}`}>
-                   <div className="font-medium text-sm truncate" title={rule.motivoSituacao}>{rule.motivoSituacao}</div>
-                   <div className="text-xs text-slate-400 mt-1 flex items-center gap-1"><FileText size={10}/> {rule.instructions?.length || 0} instruções</div>
-                 </button>
-               ))}
-             </div>
-          </div>
-
-          <div className="flex-1 card-premium p-6 overflow-hidden flex flex-col">
-             {selectedRule ? (
-               <div className="flex flex-col h-full">
-                   <div className="flex justify-between items-center border-b border-slate-100 pb-4 mb-4 shrink-0">
-                     <h3 className="font-bold text-lg text-slate-800 truncate pr-4" title={selectedRule.motivoSituacao}>{selectedRule.motivoSituacao}</h3>
-                     <button onClick={() => { 
-                         if(confirm('Excluir esta regra?')) {
-                             setKnowledgeRules(prev => prev.filter(r => r.id !== selectedRule.id)); 
-                             setSelectedRuleId(null); 
-                         }
-                     }} className="text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition-colors"><Trash2 size={18} /></button>
-                   </div>
-
-                   <div className="flex gap-2 mb-4 shrink-0">
-                       <button onClick={() => addInstruction(selectedRule.id, 'simple')} className="btn-secondary text-xs py-2"><Plus size={14}/> Resposta Simples</button>
-                       <button onClick={() => addInstruction(selectedRule.id, 'flow')} className="btn-secondary text-xs py-2"><Plus size={14}/> Resposta com Flow</button>
-                   </div>
-
-                   <div className="overflow-y-auto custom-scrollbar flex-1 space-y-4 pr-2">
-                       {(!selectedRule.instructions || selectedRule.instructions.length === 0) && (
-                           <div className="text-center p-10 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 mt-4">
-                               Nenhuma instrução criada. Clique nos botões acima para adicionar.
-                           </div>
-                       )}
-
-                       {selectedRule.instructions?.map(inst => (
-                           <div key={inst.id} className="border border-slate-200 rounded-xl p-4 bg-slate-50 focus-within:ring-2 focus-within:ring-brand-500/20 transition-all">
-                               <div className="flex justify-between mb-2 items-center">
-                                   <input type="text" value={inst.title} onChange={(e) => updateInstruction(selectedRule.id, inst.id, 'title', e.target.value)} 
-                                       className="bg-transparent font-bold text-slate-700 text-sm focus:outline-none border-b border-transparent focus:border-brand-500 w-1/2" placeholder="Título da Instrução (ex: Preço)" />
-                                   <div className="flex items-center gap-2">
-                                       <span className="text-[10px] uppercase font-bold text-slate-400 bg-white px-2 py-1 rounded border border-slate-200">{inst.type}</span>
-                                       <button onClick={() => removeInstruction(selectedRule.id, inst.id)} className="text-slate-400 hover:text-rose-500 p-1"><X size={14}/></button>
-                                   </div>
-                               </div>
-                               <textarea value={inst.content} onChange={(e) => updateInstruction(selectedRule.id, inst.id, 'content', e.target.value)}
-                                   className="w-full p-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-brand-500 bg-white min-h-[100px] resize-y" placeholder="Instruções para a IA... ex: Quando o cliente perguntar preço, fale X..." />
-                           </div>
-                       ))}
-                   </div>
-               </div>
-             ) : (
-               <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                   <BookOpen size={48} className="mb-4 opacity-20"/>
-                   <p>Selecione uma regra à esquerda ou crie uma nova.</p>
-               </div>
-             )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const ChatView = () => {
-      const activeChatData = chats.find(c => c.id === activeChat);
-      return (
-          <div className="flex h-full bg-white rounded-2xl overflow-hidden shadow-lg border border-slate-200 animate-fade-in">
-              <div className="w-80 bg-slate-50 border-r border-slate-200 flex flex-col">
-                  <div className="p-4 border-b border-slate-200 bg-slate-100">
-                      <div className="relative">
-                          <input type="text" placeholder="Buscar conversa..." className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
-                          <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-                      </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto custom-scrollbar">
-                      {chats.map(chat => (
-                          <div key={chat.id} onClick={() => setActiveChat(chat.id)} className={`p-3 border-b border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors flex items-center gap-3 ${activeChat === chat.id ? 'bg-emerald-50' : ''}`}>
-                              <div className="w-10 h-10 rounded-full bg-slate-300 flex items-center justify-center shrink-0"><User className="text-white" size={20} /></div>
-                              <div className="flex-1 min-w-0">
-                                  <div className="flex justify-between items-baseline"><h4 className="text-sm font-semibold text-slate-800 truncate">{chat.name}</h4><span className="text-xs text-slate-400">{new Date(chat.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></div>
-                                  <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
-                              </div>
-                              {chat.isAiDisabled && <div title="IA Desativada"><Bot size={14} className="text-rose-400" /></div>}
-                          </div>
-                      ))}
-                  </div>
-              </div>
-              <div className="flex-1 flex flex-col bg-[#efeae2]">
-                  {activeChat ? (
-                      <>
-                          <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center shadow-sm z-10">
-                              <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-slate-300 flex items-center justify-center"><User className="text-white" size={20} /></div>
-                                  <div><h3 className="font-semibold text-slate-800">{activeChatData?.name}</h3><p className="text-xs text-slate-500">Online</p></div>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                  <div className="flex items-center gap-2"><span className="text-xs font-medium text-slate-600">IA:</span><button onClick={() => toggleChatAi(activeChat, !!activeChatData?.isAiDisabled)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${!activeChatData?.isAiDisabled ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`inline-block h-3 w-3 transform rounded-full bg-white transition duration-200 ease-in-out ${!activeChatData?.isAiDisabled ? 'translate-x-5' : 'translate-x-1'}`} /></button></div>
-                                  <MoreVertical className="text-slate-500 cursor-pointer" />
-                              </div>
-                          </div>
-                          <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-opacity-50" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")' }}>
-                              {messages.map(msg => (
-                                  <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
-                                      <div className={`max-w-[70%] p-3 rounded-lg shadow-sm text-sm relative ${msg.fromMe ? 'bg-[#d9fdd3] text-slate-800 rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none'}`}>
-                                          {msg.type === 'ptt' || msg.type === 'audio' ? (
-                                              <div className="flex items-center gap-2 text-slate-500">
-                                                  <Mic size={16} /> <span>Áudio</span>
-                                              </div>
-                                          ) : (
-                                              <p>{msg.body}</p>
-                                          )}
-                                          <span className="text-[10px] text-slate-400 block text-right mt-1">{new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                      </div>
-                                  </div>
-                              ))}
-                              <div ref={messagesEndRef} />
-                          </div>
-                          <div className="bg-slate-100 p-3 flex items-center gap-3">
-                              <Smile className="text-slate-500 cursor-pointer" /><Paperclip className="text-slate-500 cursor-pointer" />
-                              <input type="text" className="flex-1 p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-emerald-500" placeholder="Digite uma mensagem..." value={messageInput} onChange={(e) => setMessageInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} />
-                              <button onClick={sendMessage} className="p-2 bg-emerald-500 text-white rounded-full hover:bg-emerald-600 transition-colors"><Send size={20} /></button>
-                          </div>
-                      </>
-                  ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                          <div className="w-24 h-24 bg-slate-200 rounded-full flex items-center justify-center mb-4"><MessageCircle size={40} className="text-slate-400" /></div>
-                          <h3 className="text-lg font-semibold text-slate-600">WhatsApp Conectado</h3><p>Selecione uma conversa para começar.</p>
-                      </div>
-                  )}
-              </div>
-          </div>
-      );
-  };
-
-  const WhatsAppView = () => {
-    const isConnected = waSession.status === 'connected';
-    return (
-      <div className="h-full flex flex-col animate-fade-in justify-center items-center">
-          <div className="card-premium p-10 max-w-lg w-full text-center">
-            <div className={`mx-auto mb-6 w-16 h-16 rounded-full flex items-center justify-center transition-all duration-500 ${isConnected ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-              <MessageCircle size={32} className={isConnected ? '' : 'animate-pulse'} />
-            </div>
-            <h3 className="text-2xl font-bold text-slate-800 mb-2">{isConnected ? 'WhatsApp Conectado' : 'Conectar WhatsApp'}</h3>
-            <p className="text-slate-500 mb-8">{isConnected ? 'Seu bot está online e pronto.' : 'Escaneie o QR Code.'}</p>
-            {!isConnected && waSession.status === 'qr_ready' && waSession.qrCode ? (
-              <div className="bg-white p-4 rounded-xl shadow-lg inline-block border border-slate-200"><img src={waSession.qrCode} alt="QR Code" className="w-64 h-64 object-contain" /></div>
-            ) : !isConnected ? (
-              <div className="w-64 h-64 mx-auto bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-sm">Carregando QR...</div>
-            ) : (
-              <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl border border-emerald-100 flex items-center gap-3 justify-center"><CheckCircle2 size={24} /><span className="font-semibold">Sessão Ativa</span></div>
-            )}
-            <div className="mt-8 text-xs text-slate-400">Status: <span className="font-mono font-bold">{waSession.status}</span></div>
-          </div>
-      </div>
-    );
-  };
-
-  const EmpresasView = () => {
-    // Company Base Filtering
-    const baseFiltered = companies.filter(c => {
-        const matchesSearch = baseSearch === '' || 
-            (c.razaoSocial && c.razaoSocial.toLowerCase().includes(baseSearch.toLowerCase())) ||
-            (c.cnpj && c.cnpj.includes(baseSearch)) ||
-            (c.inscricaoEstadual && c.inscricaoEstadual.includes(baseSearch)) ||
-            (c.telefone && c.telefone.includes(baseSearch));
+  // --- Filtering Logic ---
+  const filteredCompanies = useMemo(() => {
+    return companies.filter(c => {
+      const searchMatch = !filters.search || 
+        c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) ||
+        c.inscricaoEstadual?.includes(filters.search) ||
+        c.cnpj?.includes(filters.search);
         
-        const matchesCity = baseCityFilter === 'all' || c.municipio === baseCityFilter;
-        const matchesReason = baseReasonFilter === 'all' || c.motivoSituacao === baseReasonFilter;
-        const matchesAccountant = baseAccountantFilter === 'all' || 
-            (baseAccountantFilter === 'with' ? !!c.nomeContador : !c.nomeContador);
-            
-        return matchesSearch && matchesCity && matchesReason && matchesAccountant;
-    });
+      const cityMatch = !filters.city || c.municipio === filters.city;
+      
+      const reasonMatch = !filters.reason || (c.motivoSituacao && c.motivoSituacao.includes(filters.reason));
+      
+      const accountantMatch = filters.hasAccountant === 'all' ? true :
+        filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
 
+      const phoneMatch = filters.hasPhone === 'all' ? true :
+        filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+
+      return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch;
+    });
+  }, [companies, filters]);
+
+
+  // --- Render Helpers ---
+
+  const renderStatusBadge = (status: string) => {
+    const isSuccess = status === 'Sucesso' || status === Status.SUCCESS;
     return (
-        <div className="space-y-6 h-full flex flex-col animate-fade-in">
-          <div className="flex justify-between items-center">
-            <div><h2 className="text-2xl font-bold text-slate-800">Base de Empresas</h2><p className="text-slate-500">Todos os leads importados ({baseFiltered.length}).</p></div>
-            <div className="flex gap-3">
-              <button className="btn-secondary" onClick={fetchCompanies}><RefreshCw size={18} /> Atualizar</button>
-              <button className="btn-primary"><FileSpreadsheet size={18} /> Exportar</button>
-            </div>
-          </div>
-          
-          <div className="card-premium flex-1 overflow-hidden flex flex-col">
-            {/* Filter Bar */}
-            <div className="p-4 border-b border-slate-100 bg-slate-50 grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input 
-                        type="text" 
-                        placeholder="Nome, CNPJ ou Telefone..." 
-                        className="input-premium pl-10 py-2 text-sm"
-                        value={baseSearch}
-                        onChange={(e) => setBaseSearch(e.target.value)}
-                    />
-                </div>
-                <select className="input-premium py-2 text-sm" value={baseCityFilter} onChange={(e) => setBaseCityFilter(e.target.value)}>
-                    <option value="all">Todas as Cidades</option>
-                    {uniqueMunicipios.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-                <select className="input-premium py-2 text-sm" value={baseReasonFilter} onChange={(e) => setBaseReasonFilter(e.target.value)}>
-                    <option value="all">Todos os Motivos</option>
-                    {uniqueMotivos.map(m => <option key={m} value={m}>{m.length > 30 ? m.substring(0,30)+'...' : m}</option>)}
-                </select>
-                <select className="input-premium py-2 text-sm" value={baseAccountantFilter} onChange={(e) => setBaseAccountantFilter(e.target.value)}>
-                    <option value="all">Status Contador</option>
-                    <option value="with">Com Contador</option>
-                    <option value="without">Sem Contador</option>
-                </select>
-            </div>
-    
-            <div className="overflow-auto flex-1 custom-scrollbar">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
-                    <tr>
-                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Empresa</th>
-                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Situação</th>
-                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Motivo</th>
-                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Local</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {baseFiltered.length === 0 && (
-                      <tr><td colSpan={4} className="p-8 text-center text-slate-400">Nenhuma empresa encontrada com estes filtros.</td></tr>
-                  )}
-                  {baseFiltered.map((company) => (
-                    <tr key={company.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4">
-                          <div className="font-semibold text-slate-800">{company.razaoSocial}</div>
-                          <div className="text-xs text-slate-400">{company.cnpj} {company.telefone ? `• ${company.telefone}` : ''}</div>
-                          {company.nomeContador && <div className="text-xs text-brand-600 font-medium mt-1">Contador: {company.nomeContador}</div>}
-                      </td>
-                      <td className="p-4"><span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{company.situacaoCadastral || 'N/A'}</span></td>
-                      <td className="p-4 text-sm text-slate-600 max-w-xs truncate" title={company.motivoSituacao}>{company.motivoSituacao}</td>
-                      <td className="p-4 text-sm text-slate-600">{company.municipio}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      );
+      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+        isSuccess ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+      }`}>
+        {isSuccess ? 'Sucesso' : 'Erro'}
+      </span>
+    );
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
-      <div className={`bg-slate-900 text-white transition-all duration-300 flex flex-col shadow-2xl relative z-20 ${sidebarOpen ? 'w-64' : 'w-20'}`}>
-        <div className="p-6 flex items-center gap-3 border-b border-slate-800">
-          <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(37,99,235,0.5)]"><span className="font-bold text-lg">C</span></div>
-          {sidebarOpen && <div className="animate-fade-in"><h1 className="font-bold text-lg tracking-tight">CRM VIRGULA</h1></div>}
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
+      
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
+        <div className="p-4 flex items-center justify-between border-b border-brand-800/50">
+          {isSidebarOpen ? (
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-lg shadow-brand-500/20">
+                <span className="font-bold text-white text-lg">V</span>
+              </div>
+              <span className="font-bold text-lg tracking-tight">CRM VÍRGULA</span>
+            </div>
+          ) : (
+            <div className="w-8 h-8 mx-auto rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center">
+              <span className="font-bold text-white">V</span>
+            </div>
+          )}
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-brand-800 rounded-lg transition-colors">
+            <Menu size={18} className="text-brand-200" />
+          </button>
         </div>
-        <nav className="flex-1 p-4 space-y-6 overflow-y-auto custom-scrollbar">
-          <div>{sidebarOpen && <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-4">Visão Geral</p>}<SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} collapsed={!sidebarOpen} /></div>
-          <div>{sidebarOpen && <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-4">Aquisição</p>}<SidebarItem icon={Upload} label="Importar Dados" active={activeTab === 'import'} onClick={() => setActiveTab('import')} collapsed={!sidebarOpen} /><SidebarItem icon={Briefcase} label="Base de Empresas" active={activeTab === 'empresas'} onClick={() => setActiveTab('empresas')} collapsed={!sidebarOpen} /></div>
-          <div>{sidebarOpen && <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-4">Vendas</p>}<SidebarItem icon={Megaphone} label="Gestão de Campanhas" active={activeTab === 'campanhas'} onClick={() => setActiveTab('campanhas')} collapsed={!sidebarOpen} /><SidebarItem icon={MessageSquare} label="Chat Ao Vivo" active={activeTab === 'chat'} onClick={() => setActiveTab('chat')} collapsed={!sidebarOpen} /><SidebarItem icon={MessageCircle} label="Conexão WhatsApp" active={activeTab === 'whatsapp'} onClick={() => setActiveTab('whatsapp')} collapsed={!sidebarOpen} /></div>
-          <div>{sidebarOpen && <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-4">Inteligência</p>}<SidebarItem icon={BookOpen} label="Treinamento IA" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} collapsed={!sidebarOpen} /><SidebarItem icon={Settings} label="Configurações" active={activeTab === 'config'} onClick={() => setActiveTab('config')} collapsed={!sidebarOpen} /></div>
+
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
+          {[
+            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+            { id: 'import', icon: Upload, label: 'Importar PDF' },
+            { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' },
+            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', badge: waSession.status === 'connected' ? 'On' : 'Off' },
+            { id: 'knowledge', icon: BookOpen, label: 'Base de Conhecimento' },
+            { id: 'settings', icon: Settings, label: 'Configurações IA' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative ${
+                activeTab === item.id 
+                  ? 'bg-brand-600 text-white shadow-lg shadow-brand-900/50' 
+                  : 'text-brand-200 hover:bg-brand-900/50 hover:text-white'
+              }`}
+            >
+              <item.icon size={20} className={activeTab === item.id ? 'animate-pulse' : ''} />
+              {isSidebarOpen && (
+                <>
+                  <span className="font-medium text-sm flex-1 text-left">{item.label}</span>
+                  {item.badge && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                      item.badge === 'On' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                    }`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </>
+              )}
+              {!isSidebarOpen && activeTab === item.id && (
+                <div className="absolute left-full ml-2 px-2 py-1 bg-brand-800 text-xs rounded shadow-lg whitespace-nowrap z-50">
+                  {item.label}
+                </div>
+              )}
+            </button>
+          ))}
         </nav>
-        <div className="p-4 border-t border-slate-800 bg-slate-900/50"><div className={`rounded-xl p-3 flex items-center gap-3 transition-colors ${aiConfig.aiActive ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-slate-800'}`}><div className={`w-2 h-2 rounded-full shrink-0 ${aiConfig.aiActive ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />{sidebarOpen && <div className="overflow-hidden"><p className="text-xs font-bold text-slate-300">Status do Bot</p><p className="text-xs text-slate-500 truncate">{aiConfig.aiActive ? 'Respondendo...' : 'Desconectado.'}</p></div>}</div></div>
-      </div>
-      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-10">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-lg transition-colors"><Menu size={20} /></button>
-          <div className="flex items-center gap-4"><div className="flex items-center gap-2 px-3 py-1.5 bg-brand-50 text-brand-700 rounded-full text-xs font-bold border border-brand-100"><Briefcase size={14} /> CRM VIRGULA</div></div>
-        </header>
-        <main className="flex-1 overflow-y-auto p-6 custom-scrollbar relative">
-          <div className="max-w-7xl mx-auto h-full">
-            {activeTab === 'dashboard' && <DashboardView />}
-            {activeTab === 'import' && <ImportView />}
-            {activeTab === 'empresas' && <EmpresasView />}
-            {activeTab === 'campanhas' && <CampaignView />}
-            {activeTab === 'chat' && <ChatView />}
-            {activeTab === 'knowledge' && <KnowledgeBaseView />}
-            {activeTab === 'whatsapp' && <WhatsAppView />}
-            {activeTab === 'config' && <div className="flex flex-col items-center justify-center h-full text-slate-400 animate-fade-in"><Settings size={64} className="mb-4 opacity-20" /><h2 className="text-xl font-bold text-slate-600">Configurações</h2><p>Ajustes de sistema e API.</p></div>}
+
+        <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-brand-700 flex items-center justify-center border-2 border-brand-600">
+              <User size={16} className="text-brand-200" />
+            </div>
+            {isSidebarOpen && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">Usuário Admin</p>
+                <p className="text-xs text-brand-300 truncate">admin@virgula.com</p>
+              </div>
+            )}
+            {isSidebarOpen && <Power size={16} className="text-brand-400 cursor-pointer hover:text-white" />}
           </div>
-        </main>
-      </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-50/50">
+        <header className="sticky top-0 z-10 glass-effect px-8 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+            {activeTab === 'dashboard' && 'Visão Geral'}
+            {activeTab === 'import' && 'Importação de Dados'}
+            {activeTab === 'companies' && 'Base de Empresas'}
+            {activeTab === 'whatsapp' && 'Atendimento WhatsApp'}
+            {activeTab === 'knowledge' && 'Base de Conhecimento'}
+            {activeTab === 'settings' && 'Configurações'}
+          </h1>
+          <div className="flex items-center gap-4">
+            <div className="bg-white border border-slate-200 rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm text-sm text-slate-600">
+              <div className={`w-2 h-2 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              {waSession.status === 'connected' ? 'WhatsApp Online' : 'WhatsApp Offline'}
+            </div>
+          </div>
+        </header>
+
+        <div className="p-8 max-w-7xl mx-auto animate-fade-in pb-20">
+          
+          {/* --- DASHBOARD --- */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                {[
+                  { label: 'Total de Empresas', value: stats.total, color: 'text-brand-600', bg: 'bg-brand-50' },
+                  { label: 'Processadas', value: stats.processed, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { label: 'Erros de Leitura', value: stats.errors, color: 'text-rose-600', bg: 'bg-rose-50' },
+                  { label: 'Aguardando Contato', value: stats.success, color: 'text-amber-600', bg: 'bg-amber-50' },
+                ].map((stat, i) => (
+                  <div key={i} className="card-premium p-6 hover:scale-[1.02] transition-transform">
+                    <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
+                    <div className="flex items-baseline gap-2">
+                      <h3 className={`text-3xl font-bold ${stat.color}`}>{stat.value}</h3>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stat.bg} ${stat.color}`}>+12%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="card-premium p-6">
+                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                    <BarChart3 className="text-brand-500" size={20} />
+                    Distribuição por Cidade
+                  </h3>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={companies.slice(0, 5).map(c => ({ name: c.municipio, value: 1 }))}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                        <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}} />
+                        <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="card-premium p-6">
+                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                    <Upload className="text-brand-500" size={20} />
+                    Histórico de Importações
+                  </h3>
+                  <div className="overflow-y-auto h-64 custom-scrollbar pr-2">
+                    <div className="space-y-3">
+                      {imports.map((imp) => (
+                        <div key={imp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-rose-500">
+                              <FileText size={20} />
+                            </div>
+                            <div>
+                              <p className="font-medium text-sm text-slate-800">{imp.filename}</p>
+                              <p className="text-xs text-slate-500">{new Date(imp.date).toLocaleDateString()} • {imp.total} registros</p>
+                            </div>
+                          </div>
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                            imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {imp.status === 'completed' ? 'Concluído' : 'Processando'}
+                          </span>
+                        </div>
+                      ))}
+                      {imports.length === 0 && <p className="text-center text-slate-400 py-8">Nenhuma importação recente.</p>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- IMPORT --- */}
+          {activeTab === 'import' && (
+            <div className="max-w-2xl mx-auto mt-10">
+              <div className="card-premium p-8 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-colors group cursor-pointer relative">
+                <input 
+                  type="file" 
+                  accept=".pdf" 
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    try {
+                      const res = await fetch('/start-processing', { method: 'POST', body: formData });
+                      if (res.ok) {
+                        const { processId } = await res.json();
+                        alert(`Processamento iniciado! ID: ${processId}`);
+                        fetchImports();
+                      } else {
+                        alert('Erro ao enviar arquivo.');
+                      }
+                    } catch (err) { console.error(err); alert('Erro de conexão.'); }
+                  }}
+                />
+                <div className="w-20 h-20 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
+                  <Upload size={32} />
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">Arraste seu PDF da SEFAZ aqui</h3>
+                <p className="text-slate-500 mb-6">Ou clique para selecionar um arquivo do computador</p>
+                <div className="inline-block bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+                  Suporta arquivos .PDF (Lista de IEs)
+                </div>
+              </div>
+              
+              <div className="mt-8 bg-blue-50 text-blue-800 p-4 rounded-xl border border-blue-100 flex items-start gap-3">
+                <AlertCircle size={20} className="mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <p className="font-bold mb-1">Como funciona?</p>
+                  <p>O sistema lê as Inscrições Estaduais do PDF, acessa o site da SEFAZ BA automaticamente e captura a situação cadastral e o motivo da inaptidão de cada empresa.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- COMPANIES (With Advanced Filters) --- */}
+          {activeTab === 'companies' && (
+            <div className="space-y-6">
+              {/* Filter Bar */}
+              <div className="card-premium p-4 flex flex-col gap-4">
+                <div className="flex flex-col md:flex-row gap-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por Nome, IE ou CNPJ..." 
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+                      value={filters.search}
+                      onChange={e => setFilters({...filters, search: e.target.value})}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={fetchCompanies} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg" title="Atualizar Lista">
+                      <RefreshCw size={20} />
+                    </button>
+                    <button 
+                      onClick={() => setFilters({ search: '', city: '', reason: '', hasAccountant: 'all', status: 'all', hasPhone: 'all' })}
+                      className="text-sm text-brand-600 font-medium hover:underline px-2"
+                    >
+                      Limpar Filtros
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <select 
+                    className="input-premium py-2 text-sm"
+                    value={filters.city}
+                    onChange={e => setFilters({...filters, city: e.target.value})}
+                  >
+                    <option value="">Todas as Cidades</option>
+                    {availableCities.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+
+                  <select 
+                    className="input-premium py-2 text-sm"
+                    value={filters.reason}
+                    onChange={e => setFilters({...filters, reason: e.target.value})}
+                  >
+                    <option value="">Todos os Motivos</option>
+                    {availableReasons.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+
+                  <select 
+                    className="input-premium py-2 text-sm"
+                    value={filters.hasAccountant}
+                    onChange={e => setFilters({...filters, hasAccountant: e.target.value})}
+                  >
+                    <option value="all">Contador: Todos</option>
+                    <option value="yes">Com Contador</option>
+                    <option value="no">Sem Contador</option>
+                  </select>
+
+                   <select 
+                    className="input-premium py-2 text-sm"
+                    value={filters.hasPhone}
+                    onChange={e => setFilters({...filters, hasPhone: e.target.value})}
+                  >
+                    <option value="all">Telefone: Todos</option>
+                    <option value="yes">Com Telefone</option>
+                    <option value="no">Sem Telefone</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="card-premium overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                      <tr>
+                        <th className="px-6 py-4">Empresa</th>
+                        <th className="px-6 py-4">Localização</th>
+                        <th className="px-6 py-4">Contato</th>
+                        <th className="px-6 py-4">Situação</th>
+                        <th className="px-6 py-4">Status</th>
+                        <th className="px-6 py-4 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {isLoadingCompanies ? (
+                         <tr><td colSpan={6} className="p-8 text-center text-slate-400">Carregando dados...</td></tr>
+                      ) : filteredCompanies.length === 0 ? (
+                        <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhuma empresa encontrada com estes filtros.</td></tr>
+                      ) : (
+                        filteredCompanies.map((company) => (
+                          <tr key={company.id} className="hover:bg-slate-50/80 transition-colors group">
+                            <td className="px-6 py-4">
+                              <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
+                              <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{company.inscricaoEstadual}</span>
+                                {company.nomeContador ? (
+                                   <span className="text-emerald-600 flex items-center gap-1"><User size={10}/> {company.nomeContador}</span>
+                                ) : (
+                                  <span className="text-rose-400 flex items-center gap-1"><AlertCircle size={10}/> Sem contador</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-slate-600">{company.municipio}</td>
+                            <td className="px-6 py-4">
+                              {company.telefone ? (
+                                <span className="flex items-center gap-1.5 text-slate-700">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                  {company.telefone}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 italic">Não informado</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                              }`}>
+                                {company.situacaoCadastral}
+                              </span>
+                              {company.motivoSituacao && (
+                                <p className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={company.motivoSituacao}>
+                                  {company.motivoSituacao}
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">{renderStatusBadge(company.status)}</td>
+                            <td className="px-6 py-4 text-right">
+                              <button className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors">
+                                <MoreVertical size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500 flex justify-between">
+                  <span>Mostrando {filteredCompanies.length} de {companies.length} empresas</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- WHATSAPP --- */}
+          {activeTab === 'whatsapp' && (
+            <div className="flex h-[calc(100vh-140px)] gap-6">
+              {/* Chat List */}
+              <div className="w-1/3 card-premium flex flex-col">
+                <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl">
+                   {waSession.status !== 'connected' && waSession.qrCode ? (
+                      <div className="text-center p-4">
+                         <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mx-auto mb-4 border-4 border-white shadow-lg rounded-xl" />
+                         <p className="text-sm font-medium text-slate-600 animate-pulse">Escaneie para conectar</p>
+                      </div>
+                   ) : (
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-slate-700">Conversas</h3>
+                        <div className="text-xs text-emerald-600 font-medium bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100">Online</div>
+                      </div>
+                   )}
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                   {chats.map(chat => (
+                      <div 
+                        key={chat.id} 
+                        onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }}
+                        className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors ${activeChat === chat.id ? 'bg-brand-50 border-l-4 border-l-brand-500' : ''}`}
+                      >
+                         <div className="flex justify-between items-start mb-1">
+                            <h4 className="font-semibold text-slate-800 text-sm truncate max-w-[70%]">{chat.name}</h4>
+                            <span className="text-[10px] text-slate-400">{new Date(chat.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                         </div>
+                         <p className="text-xs text-slate-500 truncate flex items-center gap-1">
+                            {chat.isAiDisabled && <Bot size={12} className="text-rose-400" />}
+                            {chat.lastMessage}
+                         </p>
+                      </div>
+                   ))}
+                </div>
+              </div>
+
+              {/* Chat Window */}
+              <div className="flex-1 card-premium flex flex-col overflow-hidden relative">
+                {activeChat ? (
+                  <>
+                     <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white z-10 shadow-sm">
+                        <div className="flex items-center gap-3">
+                           <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                              <User size={20} />
+                           </div>
+                           <div>
+                              <h3 className="font-bold text-slate-800">
+                                {chats.find(c => c.id === activeChat)?.name || 'Desconhecido'}
+                              </h3>
+                              <p className="text-xs text-slate-500 flex items-center gap-1">
+                                {chats.find(c => c.id === activeChat)?.isAiDisabled ? (
+                                  <span className="text-rose-500 flex items-center gap-1"><Power size={10}/> IA Desativada</span>
+                                ) : (
+                                  <span className="text-emerald-500 flex items-center gap-1"><Bot size={10}/> IA Ativa</span>
+                                )}
+                              </p>
+                           </div>
+                        </div>
+                        <button 
+                          onClick={() => toggleAIChat(activeChat, !chats.find(c => c.id === activeChat)?.isAiDisabled)}
+                          className="btn-ghost text-xs border border-slate-200"
+                        >
+                          {chats.find(c => c.id === activeChat)?.isAiDisabled ? 'Ativar IA' : 'Pausar IA'}
+                        </button>
+                     </div>
+
+                     <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#efeae2] custom-scrollbar">
+                        {chatMessages.map(msg => (
+                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[70%] rounded-xl p-3 shadow-sm text-sm relative ${
+                                msg.fromMe ? 'bg-[#d9fdd3] text-slate-800 rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none'
+                              }`}>
+                                 {msg.hasMedia && (
+                                   <div className="mb-2 p-2 bg-black/5 rounded flex items-center gap-2 text-xs text-slate-600">
+                                      {msg.type === 'ptt' || msg.type === 'audio' ? <Mic size={14}/> : <Paperclip size={14}/>}
+                                      <span>Mídia ({msg.type})</span>
+                                   </div>
+                                 )}
+                                 <p className="whitespace-pre-wrap">{msg.body}</p>
+                                 <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">
+                                   {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                 </span>
+                              </div>
+                           </div>
+                        ))}
+                     </div>
+
+                     <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2">
+                        <button className="p-2 text-slate-400 hover:text-brand-600 transition-colors"><Paperclip size={20} /></button>
+                        <input 
+                          type="text" 
+                          placeholder="Digite uma mensagem..." 
+                          className="flex-1 bg-slate-100 border-0 rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-brand-500/20 outline-none"
+                          value={newMessage}
+                          onChange={e => setNewMessage(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                        />
+                        <button 
+                          onClick={sendMessage}
+                          className="p-2 bg-brand-600 text-white rounded-full hover:bg-brand-700 transition-colors shadow-lg shadow-brand-500/30"
+                        >
+                          <Send size={18} />
+                        </button>
+                     </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+                     <MessageSquare size={48} className="mb-4 text-slate-300" />
+                     <p>Selecione uma conversa para iniciar o atendimento</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* --- KNOWLEDGE BASE --- */}
+          {activeTab === 'knowledge' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-1 space-y-4">
+                 <button 
+                    onClick={() => {
+                       setEditingRule({
+                          id: Date.now().toString(),
+                          motivoSituacao: 'Novo Motivo',
+                          isActive: true,
+                          instructions: []
+                       });
+                    }}
+                    className="w-full btn-primary justify-between"
+                 >
+                    <span className="flex items-center gap-2"><Plus size={18} /> Nova Regra</span>
+                 </button>
+                 
+                 <div className="space-y-3">
+                    {aiConfig.knowledgeRules.map(rule => (
+                       <div 
+                          key={rule.id}
+                          onClick={() => setEditingRule(rule)}
+                          className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                             editingRule?.id === rule.id 
+                             ? 'bg-brand-50 border-brand-500 shadow-md ring-1 ring-brand-500/20' 
+                             : 'bg-white border-slate-200 hover:border-brand-300 hover:shadow-sm'
+                          }`}
+                       >
+                          <div className="flex justify-between items-start mb-2">
+                             <h4 className="font-semibold text-sm text-slate-800 line-clamp-2">{rule.motivoSituacao}</h4>
+                             <div className={`w-2 h-2 rounded-full shrink-0 mt-1.5 ${rule.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                          </div>
+                          <p className="text-xs text-slate-500">{rule.instructions.length} instruções cadastradas</p>
+                       </div>
+                    ))}
+                 </div>
+              </div>
+
+              <div className="lg:col-span-2">
+                 {editingRule ? (
+                    <div className="card-premium p-6 animate-slide-up">
+                       <div className="flex justify-between items-center mb-6">
+                          <h3 className="text-lg font-bold flex items-center gap-2">
+                             <Briefcase className="text-brand-500" size={20} />
+                             Editando Regra
+                          </h3>
+                          <div className="flex gap-2">
+                             <button 
+                                onClick={() => {
+                                   const newRules = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id);
+                                   setAiConfig({...aiConfig, knowledgeRules: newRules});
+                                   setEditingRule(null);
+                                }}
+                                className="btn-ghost text-rose-500 hover:bg-rose-50"
+                             >
+                                <Trash2 size={18} />
+                             </button>
+                             <button 
+                                onClick={() => {
+                                   const exists = aiConfig.knowledgeRules.find(r => r.id === editingRule.id);
+                                   let newRules;
+                                   if (exists) {
+                                      newRules = aiConfig.knowledgeRules.map(r => r.id === editingRule.id ? editingRule : r);
+                                   } else {
+                                      newRules = [...aiConfig.knowledgeRules, editingRule];
+                                   }
+                                   setAiConfig({...aiConfig, knowledgeRules: newRules});
+                                   setEditingRule(null);
+                                }}
+                                className="btn-primary"
+                             >
+                                <Save size={18} /> Salvar
+                             </button>
+                          </div>
+                       </div>
+
+                       <div className="space-y-4">
+                          <div>
+                             <label className="block text-sm font-medium text-slate-700 mb-1">Gatilho (Motivo SEFAZ)</label>
+                             <input 
+                                type="text" 
+                                className="input-premium"
+                                value={editingRule.motivoSituacao}
+                                onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
+                                placeholder="Ex: Art. 27 - Inc. XVIII - MEI"
+                             />
+                          </div>
+
+                          <div className="border-t border-slate-100 pt-4">
+                             <div className="flex justify-between items-center mb-4">
+                                <h4 className="font-semibold text-slate-700">Instruções para a IA</h4>
+                                <button 
+                                   onClick={() => setEditingRule({
+                                      ...editingRule,
+                                      instructions: [...editingRule.instructions, { id: Date.now().toString(), title: 'Nova Instrução', type: 'simple', content: '' }]
+                                   })}
+                                   className="text-xs btn-secondary py-1.5 px-3"
+                                >
+                                   + Adicionar Passo
+                                </button>
+                             </div>
+                             
+                             <div className="space-y-4">
+                                {editingRule.instructions.map((inst, idx) => (
+                                   <div key={inst.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 group">
+                                      <div className="flex gap-3 mb-2">
+                                         <input 
+                                            className="bg-transparent font-medium text-sm text-brand-700 placeholder-brand-300 outline-none flex-1"
+                                            value={inst.title}
+                                            onChange={e => {
+                                               const newInsts = [...editingRule.instructions];
+                                               newInsts[idx].title = e.target.value;
+                                               setEditingRule({...editingRule, instructions: newInsts});
+                                            }}
+                                            placeholder="Título (Ex: Solução)"
+                                         />
+                                         <button 
+                                            onClick={() => {
+                                               const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                               setEditingRule({...editingRule, instructions: newInsts});
+                                            }}
+                                            className="text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                         >
+                                            <X size={16} />
+                                         </button>
+                                      </div>
+                                      <textarea 
+                                         className="w-full bg-white border border-slate-200 rounded-lg p-2 text-sm text-slate-600 focus:border-brand-400 outline-none resize-none"
+                                         rows={3}
+                                         value={inst.content}
+                                         onChange={e => {
+                                            const newInsts = [...editingRule.instructions];
+                                            newInsts[idx].content = e.target.value;
+                                            setEditingRule({...editingRule, instructions: newInsts});
+                                         }}
+                                         placeholder="O que a IA deve saber/falar sobre isso..."
+                                      />
+                                   </div>
+                                ))}
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                 ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/50 rounded-2xl border-2 border-dashed border-slate-200">
+                       <BookOpen size={48} className="mb-4 text-slate-300" />
+                       <p>Selecione uma regra para editar</p>
+                    </div>
+                 )}
+              </div>
+            </div>
+          )}
+
+           {/* --- SETTINGS --- */}
+           {activeTab === 'settings' && (
+              <div className="max-w-3xl mx-auto space-y-6">
+                 <div className="card-premium p-6">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                       <Bot className="text-brand-500" size={20} />
+                       Personalidade da IA
+                    </h3>
+                    <p className="text-sm text-slate-500 mb-4">
+                       Defina como o agente deve se comportar. Isso afeta o tom de voz e a abordagem no WhatsApp.
+                    </p>
+                    <textarea 
+                       className="input-premium h-40 font-mono text-sm leading-relaxed"
+                       value={aiConfig.persona}
+                       onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                    />
+                 </div>
+
+                 <div className="card-premium p-6">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                       <Terminal className="text-brand-500" size={20} />
+                       Parâmetros do Modelo
+                    </h3>
+                    <div className="grid grid-cols-2 gap-6">
+                       <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">Modelo</label>
+                          <select 
+                             className="input-premium"
+                             value={aiConfig.model}
+                             onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
+                          >
+                             <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</option>
+                             <option value="gemini-1.5-pro">Gemini 1.5 Pro (Raciocínio)</option>
+                          </select>
+                       </div>
+                       <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">
+                             Criatividade (Temperatura): {aiConfig.temperature}
+                          </label>
+                          <input 
+                             type="range" 
+                             min="0" max="1" step="0.1"
+                             className="w-full accent-brand-600"
+                             value={aiConfig.temperature}
+                             onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
+                          />
+                          <div className="flex justify-between text-xs text-slate-400 mt-1">
+                             <span>Preciso</span>
+                             <span>Criativo</span>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+           )}
+
+        </div>
+      </main>
     </div>
   );
-}
+};
+
+export default App;
