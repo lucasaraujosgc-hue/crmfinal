@@ -21,7 +21,7 @@
     "recharts": "^2.9.3",
     "whatsapp-web.js": "^1.26.0",
     "puppeteer-core": "^22.0.0",
-    "@google/genai": "^0.2.1"
+    "@google/genai": "*"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",
