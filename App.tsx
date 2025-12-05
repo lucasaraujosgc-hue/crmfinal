@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search, Filter,
   CheckCircle2, AlertCircle, Send, RefreshCw, Megaphone, BookOpen, Plus, Power, Trash2, Terminal,
-  Briefcase, AlertTriangle, MessageSquare, User, MoreVertical, Paperclip, Smile, Play, FileText, X, Save
+  Briefcase, AlertTriangle, MessageSquare, User, MoreVertical, Paperclip, Smile, Play, FileText, X, Save, Mic
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
@@ -120,11 +120,18 @@ export default function App() {
 
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   
-  // Campaign State
+  // Filters State
   const [campaignFilter, setCampaignFilter] = useState<CampaignStatus | 'all'>('all');
   const [campaignReasonFilter, setCampaignReasonFilter] = useState<string>('all');
   const [campaignCityFilter, setCampaignCityFilter] = useState<string>('all');
   const [campaignAccountantFilter, setCampaignAccountantFilter] = useState<'all' | 'with' | 'without'>('all');
+  
+  // Company Base Filters
+  const [baseSearch, setBaseSearch] = useState('');
+  const [baseCityFilter, setBaseCityFilter] = useState('all');
+  const [baseReasonFilter, setBaseReasonFilter] = useState('all');
+  const [baseAccountantFilter, setBaseAccountantFilter] = useState('all');
+  
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
 
   // --- Initial Data Load ---
@@ -153,12 +160,18 @@ export default function App() {
         if (data.status === 'connected' && activeTab === 'chat') {
             const chatRes = await fetch('/api/whatsapp/chats');
             const chatData = await chatRes.json();
-            setChats(prev => JSON.stringify(prev) !== JSON.stringify(chatData) ? chatData : prev);
+            // Basic compare to avoid re-renders if same
+            setChats(prev => {
+                if (prev.length !== chatData.length) return chatData;
+                // If the first chat changed time, update
+                if (prev[0]?.timestamp !== chatData[0]?.timestamp) return chatData;
+                return prev;
+            });
         }
       } catch (e) {
         console.error("Polling Error", e);
       }
-    }, 5000); // 5 seconds is enough
+    }, 4000); 
     return () => clearInterval(interval);
   }, [activeTab]);
 
@@ -171,7 +184,7 @@ export default function App() {
             const res = await fetch(`/api/whatsapp/messages/${activeChat}`);
             const data = await res.json();
             setMessages(prev => {
-                // Deep compare simple optimization
+                // If different length or last message ID differs
                 if (prev.length !== data.length || prev[prev.length-1]?.id !== data[data.length-1]?.id) {
                     return data;
                 }
@@ -183,7 +196,7 @@ export default function App() {
     };
 
     fetchMessages();
-    const interval = setInterval(fetchMessages, 3000);
+    const interval = setInterval(fetchMessages, 2500); // Faster polling for live chat
     return () => clearInterval(interval);
   }, [activeChat, activeTab]);
 
@@ -231,10 +244,8 @@ export default function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rules: knowledgeRules })
         });
-        alert('Regras sincronizadas com a IA com sucesso!');
       } catch (e) {
           console.error("Erro ao sincronizar regras", e);
-          alert('Erro ao salvar regras no servidor.');
       }
   };
 
@@ -335,6 +346,14 @@ export default function App() {
   const sendMessage = async () => {
       if (!messageInput.trim() || !activeChat) return;
       try {
+          // Optimistic UI update
+          setMessages(prev => [...prev, {
+              id: 'temp-' + Date.now(),
+              fromMe: true,
+              body: messageInput,
+              timestamp: Date.now() / 1000
+          }]);
+          
           await fetch('/api/whatsapp/send', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -560,7 +579,7 @@ export default function App() {
                 <h3 className="font-bold text-slate-800 flex gap-2"><Filter size={18}/> Filtros Avançados</h3>
                 
                 <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase">Status</label>
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Status Campanha</label>
                     <select className="input-premium text-sm" value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value as any)}>
                         <option value="all">Todos</option><option value={CampaignStatus.PENDING}>Pendentes</option><option value={CampaignStatus.SENT}>Enviados</option><option value={CampaignStatus.REPLIED}>Respondidos</option>
                     </select>
@@ -818,7 +837,13 @@ export default function App() {
                               {messages.map(msg => (
                                   <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
                                       <div className={`max-w-[70%] p-3 rounded-lg shadow-sm text-sm relative ${msg.fromMe ? 'bg-[#d9fdd3] text-slate-800 rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none'}`}>
-                                          <p>{msg.body}</p>
+                                          {msg.type === 'ptt' || msg.type === 'audio' ? (
+                                              <div className="flex items-center gap-2 text-slate-500">
+                                                  <Mic size={16} /> <span>Áudio</span>
+                                              </div>
+                                          ) : (
+                                              <p>{msg.body}</p>
+                                          )}
                                           <span className="text-[10px] text-slate-400 block text-right mt-1">{new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                       </div>
                                   </div>
@@ -865,35 +890,94 @@ export default function App() {
     );
   };
 
-  const EmpresasView = () => (
-    <div className="space-y-6 h-full flex flex-col animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div><h2 className="text-2xl font-bold text-slate-800">Base de Empresas</h2><p className="text-slate-500">Todos os leads importados.</p></div>
-        <div className="flex gap-3">
-          <button className="btn-secondary" onClick={fetchCompanies}><RefreshCw size={18} /> Atualizar</button>
-          <button className="btn-primary"><FileSpreadsheet size={18} /> Exportar</button>
+  const EmpresasView = () => {
+    // Company Base Filtering
+    const baseFiltered = companies.filter(c => {
+        const matchesSearch = baseSearch === '' || 
+            (c.razaoSocial && c.razaoSocial.toLowerCase().includes(baseSearch.toLowerCase())) ||
+            (c.cnpj && c.cnpj.includes(baseSearch)) ||
+            (c.inscricaoEstadual && c.inscricaoEstadual.includes(baseSearch)) ||
+            (c.telefone && c.telefone.includes(baseSearch));
+        
+        const matchesCity = baseCityFilter === 'all' || c.municipio === baseCityFilter;
+        const matchesReason = baseReasonFilter === 'all' || c.motivoSituacao === baseReasonFilter;
+        const matchesAccountant = baseAccountantFilter === 'all' || 
+            (baseAccountantFilter === 'with' ? !!c.nomeContador : !c.nomeContador);
+            
+        return matchesSearch && matchesCity && matchesReason && matchesAccountant;
+    });
+
+    return (
+        <div className="space-y-6 h-full flex flex-col animate-fade-in">
+          <div className="flex justify-between items-center">
+            <div><h2 className="text-2xl font-bold text-slate-800">Base de Empresas</h2><p className="text-slate-500">Todos os leads importados ({baseFiltered.length}).</p></div>
+            <div className="flex gap-3">
+              <button className="btn-secondary" onClick={fetchCompanies}><RefreshCw size={18} /> Atualizar</button>
+              <button className="btn-primary"><FileSpreadsheet size={18} /> Exportar</button>
+            </div>
+          </div>
+          
+          <div className="card-premium flex-1 overflow-hidden flex flex-col">
+            {/* Filter Bar */}
+            <div className="p-4 border-b border-slate-100 bg-slate-50 grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                        type="text" 
+                        placeholder="Nome, CNPJ ou Telefone..." 
+                        className="input-premium pl-10 py-2 text-sm"
+                        value={baseSearch}
+                        onChange={(e) => setBaseSearch(e.target.value)}
+                    />
+                </div>
+                <select className="input-premium py-2 text-sm" value={baseCityFilter} onChange={(e) => setBaseCityFilter(e.target.value)}>
+                    <option value="all">Todas as Cidades</option>
+                    {uniqueMunicipios.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select className="input-premium py-2 text-sm" value={baseReasonFilter} onChange={(e) => setBaseReasonFilter(e.target.value)}>
+                    <option value="all">Todos os Motivos</option>
+                    {uniqueMotivos.map(m => <option key={m} value={m}>{m.length > 30 ? m.substring(0,30)+'...' : m}</option>)}
+                </select>
+                <select className="input-premium py-2 text-sm" value={baseAccountantFilter} onChange={(e) => setBaseAccountantFilter(e.target.value)}>
+                    <option value="all">Status Contador</option>
+                    <option value="with">Com Contador</option>
+                    <option value="without">Sem Contador</option>
+                </select>
+            </div>
+    
+            <div className="overflow-auto flex-1 custom-scrollbar">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                    <tr>
+                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Empresa</th>
+                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Situação</th>
+                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Motivo</th>
+                        <th className="p-4 text-sm font-bold text-slate-500 uppercase">Local</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {baseFiltered.length === 0 && (
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-400">Nenhuma empresa encontrada com estes filtros.</td></tr>
+                  )}
+                  {baseFiltered.map((company) => (
+                    <tr key={company.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4">
+                          <div className="font-semibold text-slate-800">{company.razaoSocial}</div>
+                          <div className="text-xs text-slate-400">{company.cnpj} {company.telefone ? `• ${company.telefone}` : ''}</div>
+                          {company.nomeContador && <div className="text-xs text-brand-600 font-medium mt-1">Contador: {company.nomeContador}</div>}
+                      </td>
+                      <td className="p-4"><span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{company.situacaoCadastral || 'N/A'}</span></td>
+                      <td className="p-4 text-sm text-slate-600 max-w-xs truncate" title={company.motivoSituacao}>{company.motivoSituacao}</td>
+                      <td className="p-4 text-sm text-slate-600">{company.municipio}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
-      <div className="card-premium flex-1 overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-slate-100"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} /><input type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20" /></div></div>
-        <div className="overflow-auto flex-1 custom-scrollbar">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm"><tr><th className="p-4 text-sm font-bold text-slate-500 uppercase">Empresa</th><th className="p-4 text-sm font-bold text-slate-500 uppercase">Situação</th><th className="p-4 text-sm font-bold text-slate-500 uppercase">Motivo</th><th className="p-4 text-sm font-bold text-slate-500 uppercase">Local</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">
-              {companies.map((company) => (
-                <tr key={company.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-4"><div className="font-semibold text-slate-800">{company.razaoSocial}</div><div className="text-xs text-slate-400">{company.cnpj}</div></td>
-                  <td className="p-4"><span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{company.situacaoCadastral || 'N/A'}</span></td>
-                  <td className="p-4 text-sm text-slate-600 max-w-xs truncate" title={company.motivoSituacao}>{company.motivoSituacao}</td>
-                  <td className="p-4 text-sm text-slate-600">{company.municipio}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+      );
+  };
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">

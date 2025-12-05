@@ -88,13 +88,15 @@ client.on('message', async msg => {
     if (msg.fromMe) return;
 
     const chat = await msg.getChat();
-    const contact = await msg.getContact();
-    const phoneNumber = contact.number; // ex: 557199998888
+    
+    // Ignora grupos ou status
+    if (chat.isGroup) return;
 
     if (disabledAI.has(chat.id._serialized)) {
         return;
     }
 
+    // Delay natural
     await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
     await chat.sendStateTyping();
 
@@ -102,6 +104,8 @@ client.on('message', async msg => {
         // 1. Identificar Empresa no Python
         let contextData = null;
         try {
+            const contact = await msg.getContact();
+            const phoneNumber = contact.number; 
             // Chamada interna para o Python (localhost:5000)
             const checkRes = await fetch(`http://127.0.0.1:5000/api/identify-contact/${phoneNumber}`);
             if (checkRes.ok) {
@@ -112,7 +116,7 @@ client.on('message', async msg => {
             console.error('[AI] Falha ao identificar contato:', err.message);
         }
 
-        // 2. Construir Prompt com Base nas Regras
+        // 2. Construir System Instruction
         let systemInstruction = `Você é um assistente comercial da CRM VIRGULA, especializado em regularização fiscal na Bahia.
         Seu tom deve ser profissional, empático e focado em resolver o problema do cliente.
         Use linguagem clara, evite juridiquês excessivo.`;
@@ -142,16 +146,45 @@ client.on('message', async msg => {
             systemInstruction += `\n\n(Cliente não identificado na base de dados. Trate como um lead novo interessado em regularização).`;
         }
 
-        systemInstruction += `\n\nHISTÓRICO: O cliente disse: "${msg.body}"`;
+        // 3. Preparar Conteúdo (Texto ou Áudio)
+        const parts = [{ text: systemInstruction }];
+        
+        let userMessage = "";
+        
+        // Verifica se tem áudio
+        if (msg.hasMedia) {
+            const media = await msg.downloadMedia();
+            if (media && media.mimetype.startsWith('audio/')) {
+                console.log('[AI] Processando mensagem de áudio...');
+                parts.push({
+                    inlineData: {
+                        mimeType: media.mimetype,
+                        data: media.data
+                    }
+                });
+                parts.push({ text: "O usuário enviou um áudio. Responda em texto de forma cordial." });
+            } else if (msg.body) {
+                userMessage = msg.body;
+            }
+        } else {
+            userMessage = msg.body;
+        }
 
-        // 3. Gerar Resposta
+        if (userMessage) {
+            parts.push({ text: `Cliente: "${userMessage}"` });
+        }
+
+        // 4. Gerar Resposta
         const ai = new GoogleGenAI({ apiKey: API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: systemInstruction // Passando como contents para simplificar no SDK novo
+            contents: { parts: parts }
         });
 
-        await chat.sendMessage(response.text);
+        const replyText = response.text;
+        if (replyText) {
+            await chat.sendMessage(replyText);
+        }
 
     } catch (e) {
         console.error('[AI] Erro:', e);
@@ -190,14 +223,21 @@ app.get('/api/whatsapp/chats', async (req, res) => {
 app.get('/api/whatsapp/messages/:chatId', async (req, res) => {
     try {
         const chat = await client.getChatById(req.params.chatId);
-        const messages = await chat.fetchMessages({ limit: 50 });
+        // Aumentando limite e tratando possível lentidão
+        const messages = await chat.fetchMessages({ limit: 60 }); 
+        
         res.json(messages.map(m => ({
             id: m.id.id,
             fromMe: m.fromMe,
             body: m.body,
+            hasMedia: m.hasMedia,
+            type: m.type,
             timestamp: m.timestamp
         })));
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 app.post('/api/whatsapp/send', async (req, res) => {
