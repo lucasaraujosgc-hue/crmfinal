@@ -1,0 +1,5 @@
+{
+  "name": "CRM",
+  "description": "A modern platform for automating tax compliance sales using SEFAZ data scraping, WhatsApp automation, and AI-driven engagement.",
+  "requestFramePermissions": []
+}
