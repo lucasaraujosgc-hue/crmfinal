@@ -11,8 +11,6 @@ import {
 import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
 
-// --- Custom Hooks ---
-
 function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
@@ -50,8 +48,6 @@ function useInterval(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
-// --- Main App Component ---
-
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -72,7 +68,6 @@ const App: React.FC = () => {
     hasPhone: 'all'
   });
   
-  // Filter Options (Fetched from API)
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [availableReasons, setAvailableReasons] = useState<string[]>([]);
 
@@ -100,7 +95,6 @@ const App: React.FC = () => {
     fetchFilters();
   }, []);
 
-  // Polling WhatsApp status & Chats
   useInterval(() => {
     fetchWhatsAppStatus();
     if (activeTab === 'whatsapp' && waSession.status === 'connected') {
@@ -109,7 +103,6 @@ const App: React.FC = () => {
     }
   }, 3000);
 
-  // Sync AI Rules with Backend
   useEffect(() => {
     fetch('/api/config/ai-rules', {
       method: 'POST',
@@ -117,8 +110,6 @@ const App: React.FC = () => {
       body: JSON.stringify({ rules: aiConfig.knowledgeRules })
     }).catch(console.error);
   }, [aiConfig.knowledgeRules]);
-
-  // --- API Calls ---
 
   const fetchFilters = async () => {
     try {
@@ -138,8 +129,6 @@ const App: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setCompanies(data);
-        
-        // Calc Stats
         const success = data.filter((c: any) => c.status === 'Sucesso' || c.status === Status.SUCCESS).length;
         const errors = data.filter((c: any) => c.status !== 'Sucesso' && c.status !== Status.SUCCESS).length;
         setStats({ total: data.length, processed: data.length, success, errors });
@@ -209,7 +198,6 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  // --- Filtering Logic ---
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {
       const searchMatch = !filters.search || 
@@ -218,21 +206,15 @@ const App: React.FC = () => {
         c.cnpj?.includes(filters.search);
         
       const cityMatch = !filters.city || c.municipio === filters.city;
-      
       const reasonMatch = !filters.reason || (c.motivoSituacao && c.motivoSituacao.includes(filters.reason));
-      
       const accountantMatch = filters.hasAccountant === 'all' ? true :
         filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
-
       const phoneMatch = filters.hasPhone === 'all' ? true :
         filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
 
       return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch;
     });
   }, [companies, filters]);
-
-
-  // --- Render Helpers ---
 
   const renderStatusBadge = (status: string) => {
     const isSuccess = status === 'Sucesso' || status === Status.SUCCESS;
@@ -247,8 +229,6 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
-      
-      {/* Sidebar */}
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
         <div className="p-4 flex items-center justify-between border-b border-brand-800/50">
           {isSidebarOpen ? (
@@ -287,44 +267,12 @@ const App: React.FC = () => {
               }`}
             >
               <item.icon size={20} className={activeTab === item.id ? 'animate-pulse' : ''} />
-              {isSidebarOpen && (
-                <>
-                  <span className="font-medium text-sm flex-1 text-left">{item.label}</span>
-                  {item.badge && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                      item.badge === 'On' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                    }`}>
-                      {item.badge}
-                    </span>
-                  )}
-                </>
-              )}
-              {!isSidebarOpen && activeTab === item.id && (
-                <div className="absolute left-full ml-2 px-2 py-1 bg-brand-800 text-xs rounded shadow-lg whitespace-nowrap z-50">
-                  {item.label}
-                </div>
-              )}
+              {isSidebarOpen && <span className="font-medium text-sm flex-1 text-left">{item.label}</span>}
             </button>
           ))}
         </nav>
-
-        <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-brand-700 flex items-center justify-center border-2 border-brand-600">
-              <User size={16} className="text-brand-200" />
-            </div>
-            {isSidebarOpen && (
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">Usuário Admin</p>
-                <p className="text-xs text-brand-300 truncate">admin@virgula.com</p>
-              </div>
-            )}
-            {isSidebarOpen && <Power size={16} className="text-brand-400 cursor-pointer hover:text-white" />}
-          </div>
-        </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-slate-50/50">
         <header className="sticky top-0 z-10 glass-effect px-8 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
@@ -345,7 +293,6 @@ const App: React.FC = () => {
 
         <div className="p-8 max-w-7xl mx-auto animate-fade-in pb-20">
           
-          {/* --- DASHBOARD --- */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -357,10 +304,7 @@ const App: React.FC = () => {
                 ].map((stat, i) => (
                   <div key={i} className="card-premium p-6 hover:scale-[1.02] transition-transform">
                     <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
-                    <div className="flex items-baseline gap-2">
-                      <h3 className={`text-3xl font-bold ${stat.color}`}>{stat.value}</h3>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stat.bg} ${stat.color}`}>+12%</span>
-                    </div>
+                    <h3 className={`text-3xl font-bold ${stat.color}`}>{stat.value}</h3>
                   </div>
                 ))}
               </div>
@@ -373,12 +317,12 @@ const App: React.FC = () => {
                   </h3>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={companies.slice(0, 5).map(c => ({ name: c.municipio, value: 1 }))}>
+                      <BarChart data={companies.slice(0, 10).map(c => ({ name: c.municipio, value: 1 }))}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 10}} />
                         <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
-                        <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}} />
-                        <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                        <Tooltip />
+                        <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -393,14 +337,9 @@ const App: React.FC = () => {
                     <div className="space-y-3">
                       {imports.map((imp) => (
                         <div key={imp.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-rose-500">
-                              <FileText size={20} />
-                            </div>
-                            <div>
+                          <div>
                               <p className="font-medium text-sm text-slate-800">{imp.filename}</p>
                               <p className="text-xs text-slate-500">{new Date(imp.date).toLocaleDateString()} • {imp.total} registros</p>
-                            </div>
                           </div>
                           <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                             imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
@@ -409,7 +348,6 @@ const App: React.FC = () => {
                           </span>
                         </div>
                       ))}
-                      {imports.length === 0 && <p className="text-center text-slate-400 py-8">Nenhuma importação recente.</p>}
                     </div>
                   </div>
                 </div>
@@ -417,7 +355,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* --- IMPORT --- */}
           {activeTab === 'import' && (
             <div className="max-w-2xl mx-auto mt-10">
               <div className="card-premium p-8 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-colors group cursor-pointer relative">
@@ -447,25 +384,12 @@ const App: React.FC = () => {
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">Arraste seu PDF da SEFAZ aqui</h3>
                 <p className="text-slate-500 mb-6">Ou clique para selecionar um arquivo do computador</p>
-                <div className="inline-block bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
-                  Suporta arquivos .PDF (Lista de IEs)
-                </div>
-              </div>
-              
-              <div className="mt-8 bg-blue-50 text-blue-800 p-4 rounded-xl border border-blue-100 flex items-start gap-3">
-                <AlertCircle size={20} className="mt-0.5 shrink-0" />
-                <div className="text-sm">
-                  <p className="font-bold mb-1">Como funciona?</p>
-                  <p>O sistema lê as Inscrições Estaduais do PDF, acessa o site da SEFAZ BA automaticamente e captura a situação cadastral e o motivo da inaptidão de cada empresa.</p>
-                </div>
               </div>
             </div>
           )}
 
-          {/* --- COMPANIES (With Advanced Filters) --- */}
           {activeTab === 'companies' && (
             <div className="space-y-6">
-              {/* Filter Bar */}
               <div className="card-premium p-4 flex flex-col gap-4">
                 <div className="flex flex-col md:flex-row gap-4">
                   <div className="flex-1 relative">
@@ -479,9 +403,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={fetchCompanies} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg" title="Atualizar Lista">
-                      <RefreshCw size={20} />
-                    </button>
+                    <button onClick={fetchCompanies} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><RefreshCw size={20} /></button>
                     <button 
                       onClick={() => setFilters({ search: '', city: '', reason: '', hasAccountant: 'all', status: 'all', hasPhone: 'all' })}
                       className="text-sm text-brand-600 font-medium hover:underline px-2"
@@ -492,39 +414,23 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <select 
-                    className="input-premium py-2 text-sm"
-                    value={filters.city}
-                    onChange={e => setFilters({...filters, city: e.target.value})}
-                  >
+                  <select className="input-premium py-2 text-sm" value={filters.city} onChange={e => setFilters({...filters, city: e.target.value})}>
                     <option value="">Todas as Cidades</option>
                     {availableCities.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
 
-                  <select 
-                    className="input-premium py-2 text-sm"
-                    value={filters.reason}
-                    onChange={e => setFilters({...filters, reason: e.target.value})}
-                  >
+                  <select className="input-premium py-2 text-sm" value={filters.reason} onChange={e => setFilters({...filters, reason: e.target.value})}>
                     <option value="">Todos os Motivos</option>
                     {availableReasons.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
 
-                  <select 
-                    className="input-premium py-2 text-sm"
-                    value={filters.hasAccountant}
-                    onChange={e => setFilters({...filters, hasAccountant: e.target.value})}
-                  >
+                  <select className="input-premium py-2 text-sm" value={filters.hasAccountant} onChange={e => setFilters({...filters, hasAccountant: e.target.value})}>
                     <option value="all">Contador: Todos</option>
                     <option value="yes">Com Contador</option>
                     <option value="no">Sem Contador</option>
                   </select>
 
-                   <select 
-                    className="input-premium py-2 text-sm"
-                    value={filters.hasPhone}
-                    onChange={e => setFilters({...filters, hasPhone: e.target.value})}
-                  >
+                   <select className="input-premium py-2 text-sm" value={filters.hasPhone} onChange={e => setFilters({...filters, hasPhone: e.target.value})}>
                     <option value="all">Telefone: Todos</option>
                     <option value="yes">Com Telefone</option>
                     <option value="no">Sem Telefone</option>
@@ -532,7 +438,6 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Table */}
               <div className="card-premium overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
@@ -543,14 +448,13 @@ const App: React.FC = () => {
                         <th className="px-6 py-4">Contato</th>
                         <th className="px-6 py-4">Situação</th>
                         <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {isLoadingCompanies ? (
-                         <tr><td colSpan={6} className="p-8 text-center text-slate-400">Carregando dados...</td></tr>
+                         <tr><td colSpan={5} className="p-8 text-center text-slate-400">Carregando dados...</td></tr>
                       ) : filteredCompanies.length === 0 ? (
-                        <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhuma empresa encontrada com estes filtros.</td></tr>
+                        <tr><td colSpan={5} className="p-8 text-center text-slate-400">Nenhuma empresa encontrada.</td></tr>
                       ) : (
                         filteredCompanies.map((company) => (
                           <tr key={company.id} className="hover:bg-slate-50/80 transition-colors group">
@@ -572,9 +476,7 @@ const App: React.FC = () => {
                                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
                                   {company.telefone}
                                 </span>
-                              ) : (
-                                <span className="text-slate-400 italic">Não informado</span>
-                              )}
+                              ) : <span className="text-slate-400 italic">Não informado</span>}
                             </td>
                             <td className="px-6 py-4">
                               <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
@@ -589,28 +491,18 @@ const App: React.FC = () => {
                               )}
                             </td>
                             <td className="px-6 py-4">{renderStatusBadge(company.status)}</td>
-                            <td className="px-6 py-4 text-right">
-                              <button className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors">
-                                <MoreVertical size={18} />
-                              </button>
-                            </td>
                           </tr>
                         ))
                       )}
                     </tbody>
                   </table>
                 </div>
-                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50 text-xs text-slate-500 flex justify-between">
-                  <span>Mostrando {filteredCompanies.length} de {companies.length} empresas</span>
-                </div>
               </div>
             </div>
           )}
 
-          {/* --- WHATSAPP --- */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-[calc(100vh-140px)] gap-6">
-              {/* Chat List */}
               <div className="w-1/3 card-premium flex flex-col">
                 <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl">
                    {waSession.status !== 'connected' && waSession.qrCode ? (
@@ -645,7 +537,6 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Chat Window */}
               <div className="flex-1 card-premium flex flex-col overflow-hidden relative">
                 {activeChat ? (
                   <>
@@ -688,16 +579,12 @@ const App: React.FC = () => {
                                    </div>
                                  )}
                                  <p className="whitespace-pre-wrap">{msg.body}</p>
-                                 <span className="text-[10px] text-slate-400 block text-right mt-1 opacity-70">
-                                   {new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                 </span>
                               </div>
                            </div>
                         ))}
                      </div>
 
                      <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2">
-                        <button className="p-2 text-slate-400 hover:text-brand-600 transition-colors"><Paperclip size={20} /></button>
                         <input 
                           type="text" 
                           placeholder="Digite uma mensagem..." 
@@ -724,19 +611,16 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* --- KNOWLEDGE BASE --- */}
           {activeTab === 'knowledge' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 space-y-4">
                  <button 
-                    onClick={() => {
-                       setEditingRule({
+                    onClick={() => setEditingRule({
                           id: Date.now().toString(),
                           motivoSituacao: 'Novo Motivo',
                           isActive: true,
                           instructions: []
-                       });
-                    }}
+                       })}
                     className="w-full btn-primary justify-between"
                  >
                     <span className="flex items-center gap-2"><Plus size={18} /> Nova Regra</span>
@@ -878,7 +762,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-           {/* --- SETTINGS --- */}
            {activeTab === 'settings' && (
               <div className="max-w-3xl mx-auto space-y-6">
                  <div className="card-premium p-6">
@@ -886,9 +769,6 @@ const App: React.FC = () => {
                        <Bot className="text-brand-500" size={20} />
                        Personalidade da IA
                     </h3>
-                    <p className="text-sm text-slate-500 mb-4">
-                       Defina como o agente deve se comportar. Isso afeta o tom de voz e a abordagem no WhatsApp.
-                    </p>
                     <textarea 
                        className="input-premium h-40 font-mono text-sm leading-relaxed"
                        value={aiConfig.persona}
@@ -912,22 +792,6 @@ const App: React.FC = () => {
                              <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</option>
                              <option value="gemini-1.5-pro">Gemini 1.5 Pro (Raciocínio)</option>
                           </select>
-                       </div>
-                       <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-2">
-                             Criatividade (Temperatura): {aiConfig.temperature}
-                          </label>
-                          <input 
-                             type="range" 
-                             min="0" max="1" step="0.1"
-                             className="w-full accent-brand-600"
-                             value={aiConfig.temperature}
-                             onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
-                          />
-                          <div className="flex justify-between text-xs text-slate-400 mt-1">
-                             <span>Preciso</span>
-                             <span>Criativo</span>
-                          </div>
                        </div>
                     </div>
                  </div>

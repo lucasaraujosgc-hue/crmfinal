@@ -1,3 +1,4 @@
+import './polyfill.js'; // IMPORTANTE: Deve ser a primeira importação
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -127,7 +128,7 @@ const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './whatsapp_auth' }),
     puppeteer: {
         headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome',
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
     }
 });
@@ -153,6 +154,7 @@ client.on('message', async msg => {
     const chat = await msg.getChat();
     if (chat.isGroup || disabledAI.has(chat.id._serialized)) return;
 
+    // Delay natural para parecer humano
     await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
     await chat.sendStateTyping();
 
@@ -205,29 +207,41 @@ client.on('message', async msg => {
                 if (media) {
                     if (media.mimetype.startsWith('audio/') || media.mimetype.includes('ogg')) {
                         console.log('[AI] Processando áudio...');
+                        // O Gemini aceita audio via inlineData com mimeType apropriado
                         parts.push({ inlineData: { mimeType: media.mimetype.replace('; codecs=opus', ''), data: media.data } });
                         parts.push({ text: "O usuário enviou um áudio. Ouça com atenção e responda em texto de forma cordial." });
                         hasAudio = true;
                     } else if (media.mimetype.startsWith('image/')) {
                         parts.push({ inlineData: { mimeType: media.mimetype, data: media.data } });
-                        if (msg.body) parts.push({ text: `Legenda: ${msg.body}` });
+                        if (msg.body) parts.push({ text: `Legenda da imagem: ${msg.body}` });
                     }
                 }
             } catch (e) { console.error("Erro mídia:", e); }
         }
 
         if (!hasAudio && msg.body) parts.push({ text: `Cliente: "${msg.body}"` });
+        
+        // Se não tem texto nem áudio/imagem, ignora
         if (parts.length === 1 && !hasAudio) return;
 
         const ai = new GoogleGenAI({ apiKey: API_KEY });
         const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: { parts } });
         
-        if (response.text) await chat.sendMessage(response.text);
-    } catch (e) { console.error('[AI] Erro:', e); }
+        if (response.text) {
+            await chat.clearState();
+            await chat.sendMessage(response.text);
+        }
+    } catch (e) { 
+        console.error('[AI] Erro:', e);
+        await chat.clearState();
+    }
 });
 
 async function initializeWhatsApp() {
-    try { await client.initialize(); } catch (e) { setTimeout(initializeWhatsApp, 10000); }
+    try { await client.initialize(); } catch (e) { 
+        console.error('Erro ao inicializar WhatsApp:', e);
+        setTimeout(initializeWhatsApp, 10000); 
+    }
 }
 initializeWhatsApp();
 
@@ -270,7 +284,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
     try {
         browser = await puppeteer.launch({
             headless: true, // "new"
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome',
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
             args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
 
@@ -306,7 +320,6 @@ async function runScraping(processId, filepath, isReprocess = false) {
                         { timeout: 10000 }
                     );
                 } catch(waitErr) {
-                    // Timeout na espera
                     throw new Error("Timeout aguardando resultado");
                 }
 
@@ -383,7 +396,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
     }
 }
 
-// --- Rotas API de Scraping ---
+// --- Rotas API ---
 
 app.post('/start-processing', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo' });
@@ -495,7 +508,6 @@ app.get('/api/identify-contact/:phone', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// WhatsApp API
 app.get('/api/whatsapp/chats', async (req, res) => {
     if (whatsappStatus !== 'connected') return res.json([]);
     try {
@@ -535,11 +547,17 @@ app.post('/api/whatsapp/send', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/whatsapp/toggle-ai', async (req, res) => {
+    const { chatId, active } = req.body;
+    if (active) disabledAI.delete(chatId);
+    else disabledAI.add(chatId);
+    res.json({ success: true });
+});
+
 app.get('/api/whatsapp/status', (req, res) => {
     res.json({ status: whatsappStatus, qr: qrCodeData });
 });
 
-// Serve React
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
 
