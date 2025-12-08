@@ -25,7 +25,8 @@
     "sqlite3": "^5.1.7",
     "pdf-parse": "^1.1.1",
     "multer": "^1.4.5-lts.1",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0-rc.12",
+    "buffer": "^6.0.3"
   },
   "devDependencies": {
     "@types/react": "^18.2.37",

@@ -155,6 +155,7 @@ client.on('message', async msg => {
 
     try {
         let contextData = null;
+        // Correção do erro window.Store: Try/Catch ao pegar contato
         try {
             const contact = await msg.getContact();
             const cleanPhone = contact.number.replace(/\D/g, '').slice(-8);
@@ -167,7 +168,9 @@ client.on('message', async msg => {
                     motivoSituacao: row.motivo_situacao_cadastral
                 };
             }
-        } catch (err) { console.error('[AI] Contact lookup error:', err); }
+        } catch (err) { 
+            console.error('[AI] Erro ao buscar contato (continuando sem contexto):', err.message); 
+        }
 
         let systemInstruction = `Você é um assistente comercial da CRM VIRGULA.`;
         if (contextData) {
@@ -186,6 +189,7 @@ client.on('message', async msg => {
                 const media = await msg.downloadMedia();
                 if (media) {
                     if (media.mimetype.startsWith('audio/') || media.mimetype.includes('ogg')) {
+                         // Gemini suporta áudio nativamente
                          parts.push({ inlineData: { mimeType: media.mimetype.replace('; codecs=opus', ''), data: media.data } });
                          parts.push({ text: "O usuário enviou um áudio. Responda em texto." });
                          hasAudio = true;
@@ -232,7 +236,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
             const data = await pdf(dataBuffer);
             console.log(`[Scraper] Texto extraído (${data.text.length} chars)`);
             
-            // Regex mais flexível para capturar 8 ou 9 dígitos soltos ou formatados
+            // Regex ajustado para capturar IEs com ou sem formatação (xxx.xxx.xxx-xx ou xxxxxxxx)
             const regex = /(\d{2,3}\.?\d{3}\.?\d{3}-?\d{2}|\b\d{8,9}\b)/g;
             const matches = data.text.match(regex);
             
@@ -266,90 +270,86 @@ async function runScraping(processId, filepath, isReprocess = false) {
         });
 
         const page = await browser.newPage();
-        // User Agent para evitar bloqueios simples
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
 
         for (let i = 0; i < ies.length; i++) {
             const ie = ies[i];
             try {
-                // console.log(`[Scraper] Consultando IE ${ie} (${i+1}/${ies.length})`);
-                
-                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                // Navegação com retry implícito via timeout alto e networkidle2
+                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { 
+                    waitUntil: 'networkidle2', 
+                    timeout: 45000 
+                });
                 
                 await page.waitForSelector('input[name="IE"]', { timeout: 15000 });
                 
-                // Limpa e digita
                 await page.$eval('input[name="IE"]', el => el.value = '');
                 await page.type('input[name="IE"]', ie);
 
-                // Clica no botão
-                const btnClicked = await page.evaluate(() => {
-                    const btn = document.querySelector("input[type='submit'][name='B2']");
-                    if (btn) { btn.click(); return true; }
-                    return false;
-                });
+                // Clicar e esperar navegação
+                await Promise.all([
+                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                    page.click("input[type='submit'][name='B2']")
+                ]).catch(() => console.log('Navegação falhou ou timeout, tentando ler página atual...'));
 
-                if (btnClicked) {
-                    // Espera resultado ou erro
-                    try {
-                        await page.waitForFunction(
-                            () => document.body.innerText.includes('Consulta Básica ao Cadastro do ICMS da Bahia') || 
-                                  document.body.innerText.includes('Não foram encontrados registros') ||
-                                  document.body.innerText.includes('CPF / CNPJ / IE Inválido'),
-                            { timeout: 15000 }
-                        );
-                    } catch (waitErr) {
-                        console.warn(`[Scraper] Timeout esperando resultado para ${ie}`);
-                        throw new Error("Timeout waiting for response");
-                    }
+                const html = await page.content();
+                const $ = cheerio.load(html);
+                const bodyText = $('body').text();
 
-                    const html = await page.content();
-                    const $ = cheerio.load(html);
-                    const bodyText = $('body').text();
-
-                    if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
-                         const extract = (label) => {
-                            // Procura elemento B que contenha o label
-                            const b = $(`b:contains("${label}")`).first();
-                            if (b.length && b[0].nextSibling && b[0].nextSibling.nodeType === 3) {
-                                return $(b[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
-                            }
-                            // Tenta buscar no parent se não achar direto
-                            if (b.length) return b.parent().text().replace(label, '').trim();
-                            return null;
-                        };
-
-                        const dados = {
-                            inscricao_estadual: ie,
-                            cnpj: extract('CNPJ:') || '',
-                            razao_social: extract('Razão Social:') || '',
-                            municipio: extract('Município:') || '',
-                            telefone: extract('Telefone:') || '',
-                            situacao: extract('Situação Cadastral Vigente:') || 'Desconhecida',
-                            motivo: extract('Motivo desta Situação Cadastral:') || '',
-                            contador: extract('Nome:') || '' // Nome do contador
-                        };
-
-                        if (isReprocess) {
-                            await runQuery(`UPDATE resultado SET situacao_cadastral = ?, motivo_situacao_cadastral = ?, status = 'Sucesso' WHERE consulta_id = ? AND inscricao_estadual = ?`, 
-                            [dados.situacao, dados.motivo, processId, ie]);
-                        } else {
-                            await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, cnpj, razao_social, municipio, telefone, situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`, 
-                            [processId, ie, dados.cnpj, dados.razao_social, dados.municipio, dados.telefone, dados.situacao, dados.motivo, dados.contador]);
+                if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
+                     // Helper de extração padrão (Label + nextSibling)
+                     const extract = (label) => {
+                        const b = $(`b:contains("${label}")`).first();
+                        if (b.length && b[0].nextSibling && b[0].nextSibling.nodeType === 3) {
+                            return $(b[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
                         }
-                    } else {
-                         const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro na página';
-                         if (!isReprocess) {
-                             await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${erroMsg}`]);
-                         }
+                        if (b.length) return b.parent().text().replace(label, '').trim();
+                        return null;
+                    };
+
+                    // Lógica específica para Atividade Econômica (que fica na próxima linha TR)
+                    let atividade = extract('Atividade Econômica Principal') || extract('Atividade Econ&ocirc;mica Principal');
+                    if (!atividade) {
+                        const ativLabel = $(`b:contains("Atividade Econômica")`).first();
+                        if (ativLabel.length) {
+                            const parentTr = ativLabel.closest('tr');
+                            const nextTr = parentTr.next('tr');
+                            if (nextTr.length) {
+                                atividade = nextTr.text().trim();
+                            }
+                        }
                     }
+
+                    const dados = {
+                        inscricao_estadual: ie,
+                        cnpj: extract('CNPJ:') || '',
+                        razao_social: extract('Razão Social:') || extract('Raz&atilde;o Social:') || '',
+                        municipio: extract('Município:') || extract('Munic&iacute;pio:') || '',
+                        telefone: extract('Telefone:') || '',
+                        situacao: extract('Situação Cadastral Vigente:') || extract('Situa&ccedil;&atilde;o Cadastral Vigente:') || 'Desconhecida',
+                        motivo: extract('Motivo desta Situação Cadastral:') || extract('Motivo desta Situa&ccedil;&atilde;o Cadastral:') || '',
+                        contador: extract('Nome:') || '',
+                        atividade_economica_principal: atividade || ''
+                    };
+
+                    if (isReprocess) {
+                        await runQuery(`UPDATE resultado SET situacao_cadastral = ?, motivo_situacao_cadastral = ?, status = 'Sucesso' WHERE consulta_id = ? AND inscricao_estadual = ?`, 
+                        [dados.situacao, dados.motivo, processId, ie]);
+                    } else {
+                        await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, cnpj, razao_social, municipio, telefone, situacao_cadastral, motivo_situacao_cadastral, nome_contador, atividade_economica_principal, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`, 
+                        [processId, ie, dados.cnpj, dados.razao_social, dados.municipio, dados.telefone, dados.situacao, dados.motivo, dados.contador, dados.atividade_economica_principal]);
+                    }
+                } else {
+                     const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro na página';
+                     if (!isReprocess) {
+                         await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${erroMsg}`]);
+                     }
                 }
             } catch (err) {
                 console.error(`[Scraper] Erro ao processar IE ${ie}:`, err.message);
                 if (!isReprocess) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
             }
             await runQuery("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
-            // Pequeno delay para não sobrecarregar
             await new Promise(r => setTimeout(r, 500));
         }
     } catch (e) { 
