@@ -155,26 +155,32 @@ client.on('message', async msg => {
 
     try {
         let contextData = null;
-        // Correção do erro window.Store: Try/Catch ao pegar contato
+        // Correção Robustez: Tenta pegar o contato, se falhar, continua sem contexto
         try {
             const contact = await msg.getContact();
-            const cleanPhone = contact.number.replace(/\D/g, '').slice(-8);
-            const row = await getOne("SELECT * FROM resultado WHERE telefone LIKE ?", [`%${cleanPhone}`]);
-            if (row) {
-                contextData = {
-                    razaoSocial: row.razao_social,
-                    municipio: row.municipio,
-                    situacao: row.situacao_cadastral,
-                    motivoSituacao: row.motivo_situacao_cadastral
-                };
+            if (contact && contact.number) {
+                const cleanPhone = contact.number.replace(/\D/g, '').slice(-8);
+                const row = await getOne("SELECT * FROM resultado WHERE telefone LIKE ?", [`%${cleanPhone}`]);
+                if (row) {
+                    contextData = {
+                        razaoSocial: row.razao_social,
+                        municipio: row.municipio,
+                        situacao: row.situacao_cadastral,
+                        motivoSituacao: row.motivo_situacao_cadastral
+                    };
+                }
             }
         } catch (err) { 
-            console.error('[AI] Erro ao buscar contato (continuando sem contexto):', err.message); 
+            console.warn('[AI] Aviso: Não foi possível obter detalhes do contato (continuando).', err.message); 
         }
 
         let systemInstruction = `Você é um assistente comercial da CRM VIRGULA.`;
         if (contextData) {
-            systemInstruction += `\n\nContexto: Cliente ${contextData.razaoSocial}, Situação: ${contextData.situacao}, Motivo: ${contextData.motivoSituacao}`;
+            systemInstruction += `\n\nContexto do Cliente:
+            Empresa: ${contextData.razaoSocial}
+            Situação na SEFAZ: ${contextData.situacao}
+            Motivo da Inaptidão: ${contextData.motivoSituacao}`;
+            
             const matchingRule = activeRules.find(r => contextData.motivoSituacao && r.motivoSituacao && contextData.motivoSituacao.includes(r.motivoSituacao));
             if (matchingRule) {
                 matchingRule.instructions.forEach(inst => systemInstruction += `\n[${inst.title}]: ${inst.content}`);
@@ -189,9 +195,8 @@ client.on('message', async msg => {
                 const media = await msg.downloadMedia();
                 if (media) {
                     if (media.mimetype.startsWith('audio/') || media.mimetype.includes('ogg')) {
-                         // Gemini suporta áudio nativamente
                          parts.push({ inlineData: { mimeType: media.mimetype.replace('; codecs=opus', ''), data: media.data } });
-                         parts.push({ text: "O usuário enviou um áudio. Responda em texto." });
+                         parts.push({ text: "O usuário enviou um áudio. Responda em texto baseando-se no que foi dito." });
                          hasAudio = true;
                     }
                 }
@@ -210,7 +215,7 @@ client.on('message', async msg => {
             await chat.sendMessage(response.text);
         }
     } catch (e) { 
-        console.error('[AI] Erro:', e);
+        console.error('[AI] Erro ao processar mensagem:', e);
         await chat.clearState();
     }
 });
@@ -220,7 +225,7 @@ async function initializeWhatsApp() {
 }
 initializeWhatsApp();
 
-// --- Lógica de Scraping ---
+// --- Lógica de Scraping (Réplica do Python) ---
 
 async function runScraping(processId, filepath, isReprocess = false) {
     let ies = [];
@@ -236,12 +241,23 @@ async function runScraping(processId, filepath, isReprocess = false) {
             const data = await pdf(dataBuffer);
             console.log(`[Scraper] Texto extraído (${data.text.length} chars)`);
             
-            // Regex ajustado para capturar IEs com ou sem formatação (xxx.xxx.xxx-xx ou xxxxxxxx)
-            const regex = /(\d{2,3}\.?\d{3}\.?\d{3}-?\d{2}|\b\d{8,9}\b)/g;
-            const matches = data.text.match(regex);
+            // Regex fiel ao Python: (\d{1,3}\.\d{1,3}\.\d{1,3})\s*-
+            // Captura padrão "123.456.789 - X" e pega apenas os números
+            const regex = /(\d{1,3}\.\d{1,3}\.\d{1,3})\s*-/g;
+            const matches = [...data.text.matchAll(regex)];
             
-            if (matches) {
-                ies = [...new Set(matches.map(m => m.replace(/\D/g, '')))].filter(ie => ie.length >= 8);
+            if (matches && matches.length > 0) {
+                // match[1] é o grupo de captura (números com pontos)
+                const rawIes = matches.map(m => m[1].replace(/\D/g, ''));
+                // Filtra para garantir que tem pelo menos 8 dígitos (IE Bahia costuma ter 9)
+                ies = [...new Set(rawIes)].filter(ie => ie.length >= 8);
+            } else {
+                // Fallback para números soltos de 9 dígitos se a regex rígida falhar
+                const fallbackRegex = /\b\d{8,9}\b/g;
+                const fallbackMatches = data.text.match(fallbackRegex);
+                 if (fallbackMatches) {
+                     ies = [...new Set(fallbackMatches)];
+                 }
             }
             console.log(`[Scraper] Encontradas ${ies.length} IEs únicas no PDF`);
         } catch (e) {
@@ -275,20 +291,20 @@ async function runScraping(processId, filepath, isReprocess = false) {
         for (let i = 0; i < ies.length; i++) {
             const ie = ies[i];
             try {
-                // Navegação com retry implícito via timeout alto e networkidle2
+                // Timeout aumentado para tolerar lentidão
                 await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { 
                     waitUntil: 'networkidle2', 
-                    timeout: 45000 
+                    timeout: 60000 
                 });
                 
-                await page.waitForSelector('input[name="IE"]', { timeout: 15000 });
+                await page.waitForSelector('input[name="IE"]', { timeout: 20000 });
                 
                 await page.$eval('input[name="IE"]', el => el.value = '');
                 await page.type('input[name="IE"]', ie);
 
-                // Clicar e esperar navegação
+                // Clica e espera a navegação
                 await Promise.all([
-                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
                     page.click("input[type='submit'][name='B2']")
                 ]).catch(() => console.log('Navegação falhou ou timeout, tentando ler página atual...'));
 
@@ -297,26 +313,31 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 const bodyText = $('body').text();
 
                 if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
-                     // Helper de extração padrão (Label + nextSibling)
+                     // Helper de extração (Replica a lógica do unescape + strip)
                      const extract = (label) => {
-                        const b = $(`b:contains("${label}")`).first();
-                        if (b.length && b[0].nextSibling && b[0].nextSibling.nodeType === 3) {
-                            return $(b[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
+                        // Busca tag B contendo o texto, ignorando case e entidades html
+                        const el = $('b').filter((i, el) => {
+                            const t = $(el).text().replace(/\s+/g, ' ').trim();
+                            return t.includes(label);
+                        }).first();
+
+                        if (el.length && el[0].nextSibling && el[0].nextSibling.nodeType === 3) {
+                            return $(el[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
                         }
-                        if (b.length) return b.parent().text().replace(label, '').trim();
+                        if (el.length) return el.parent().text().replace(label, '').trim();
                         return null;
                     };
 
-                    // Lógica específica para Atividade Econômica (que fica na próxima linha TR)
-                    let atividade = extract('Atividade Econômica Principal') || extract('Atividade Econ&ocirc;mica Principal');
-                    if (!atividade) {
-                        const ativLabel = $(`b:contains("Atividade Econômica")`).first();
-                        if (ativLabel.length) {
-                            const parentTr = ativLabel.closest('tr');
-                            const nextTr = parentTr.next('tr');
-                            if (nextTr.length) {
-                                atividade = nextTr.text().trim();
-                            }
+                    // Lógica ESPECÍFICA do Python para Atividade Econômica
+                    // Python: tag_ativ.find_parent('tr').find_next_sibling('tr').get_text()
+                    let atividade = '';
+                    const ativLabel = $('b').filter((i, el) => $(el).text().includes('Atividade Econômica') || $(el).text().includes('Atividade Econômica Principal'));
+                    
+                    if (ativLabel.length) {
+                        const parentTr = ativLabel.closest('tr');
+                        const nextTr = parentTr.next('tr');
+                        if (nextTr.length) {
+                            atividade = nextTr.text().replace(/&nbsp;/g, ' ').trim();
                         }
                     }
 
@@ -328,8 +349,8 @@ async function runScraping(processId, filepath, isReprocess = false) {
                         telefone: extract('Telefone:') || '',
                         situacao: extract('Situação Cadastral Vigente:') || extract('Situa&ccedil;&atilde;o Cadastral Vigente:') || 'Desconhecida',
                         motivo: extract('Motivo desta Situação Cadastral:') || extract('Motivo desta Situa&ccedil;&atilde;o Cadastral:') || '',
-                        contador: extract('Nome:') || '',
-                        atividade_economica_principal: atividade || ''
+                        contador: extract('Nome:') || '', // Nome do contador geralmente vem após 'Nome:'
+                        atividade_economica_principal: atividade
                     };
 
                     if (isReprocess) {
@@ -340,7 +361,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
                         [processId, ie, dados.cnpj, dados.razao_social, dados.municipio, dados.telefone, dados.situacao, dados.motivo, dados.contador, dados.atividade_economica_principal]);
                     }
                 } else {
-                     const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro na página';
+                     const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro na página ou bloqueio';
                      if (!isReprocess) {
                          await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${erroMsg}`]);
                      }
@@ -350,7 +371,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 if (!isReprocess) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
             }
             await runQuery("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1000)); // Delay para evitar bloqueio
         }
     } catch (e) { 
         console.error("[Scraper] Erro fatal no browser:", e); 
