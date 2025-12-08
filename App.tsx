@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
-  BarChart3, Trello, MoreHorizontal, PlayCircle, PauseCircle, CheckSquare, Square
+  BarChart3, Trello, MoreHorizontal, PlayCircle, PauseCircle, CheckSquare, Square,
+  Users, Rocket, Sparkles
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -52,6 +53,14 @@ function useInterval(callback: () => void, delay: number | null) {
 
 // --- Components ---
 
+interface Campaign {
+    id: string;
+    name: string;
+    description: string;
+    stats: { total: number; sent: number; replied: number };
+    status: string;
+}
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -59,6 +68,7 @@ const App: React.FC = () => {
   // Data States
   const [companies, setCompanies] = useState<CompanyResult[]>([]);
   const [imports, setImports] = useState<ImportBatch[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
 
@@ -81,9 +91,16 @@ const App: React.FC = () => {
 
   // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
-  const [bulkMessage, setBulkMessage] = useState('');
-  const [isSendingBulk, setIsSendingBulk] = useState(false);
+  
+  // Campaign Wizard State
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+  const [campaignStep, setCampaignStep] = useState(1);
+  const [newCampaign, setNewCampaign] = useState({
+     name: '',
+     description: '',
+     initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+     aiPersona: DEFAULT_AI_PERSONA
+  });
 
   // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
@@ -107,11 +124,14 @@ const App: React.FC = () => {
     fetchCompanies();
     fetchImports();
     fetchFilters();
+    fetchCampaigns();
   }, []);
 
   useEffect(() => {
     // Clear selection when tab changes
     setSelectedIds(new Set());
+    setIsCreatingCampaign(false);
+    setCampaignStep(1);
   }, [activeTab]);
 
   useInterval(() => {
@@ -166,9 +186,9 @@ const App: React.FC = () => {
     fetch('/api/config/ai-rules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rules: aiConfig.knowledgeRules })
+      body: JSON.stringify({ rules: aiConfig.knowledgeRules, persona: aiConfig.persona })
     }).catch(console.error);
-  }, [aiConfig.knowledgeRules]);
+  }, [aiConfig.knowledgeRules, aiConfig.persona]);
 
   // --- API Calls ---
 
@@ -181,6 +201,13 @@ const App: React.FC = () => {
         setAvailableReasons(data.motivos || []);
       }
     } catch (e) { console.error(e); }
+  };
+
+  const fetchCampaigns = async () => {
+      try {
+          const res = await fetch('/api/campaigns');
+          if (res.ok) setCampaigns(await res.json());
+      } catch (e) { console.error(e); }
   };
 
   const fetchCompanies = async () => {
@@ -203,6 +230,22 @@ const App: React.FC = () => {
       const res = await fetch('/get-imports');
       if (res.ok) setImports(await res.json());
     } catch (e) { console.error(e); }
+  };
+
+  const deleteImport = async (id: string) => {
+      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista.')) return;
+      try {
+          await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+          fetchImports();
+          fetchCompanies();
+      } catch(e) { alert('Erro ao deletar'); }
+  };
+
+  const retryImport = async (id: string) => {
+      try {
+          await fetch(`/api/imports/retry/${id}`, { method: 'POST' });
+          setCurrentProcessId(id); // Start polling
+      } catch(e) { alert('Erro ao reprocessar'); }
   };
 
   const fetchWhatsAppStatus = async () => {
@@ -256,26 +299,27 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  const handleBulkSend = async () => {
-    if (selectedIds.size === 0 || !bulkMessage.trim()) return;
-    setIsSendingBulk(true);
-    try {
-      const res = await fetch('/api/campaigns/send-bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: Array.from(selectedIds), message: bulkMessage })
-      });
-      if (res.ok) {
-        alert('Disparo iniciado! As mensagens serão enviadas em fila.');
-        setIsMessageModalOpen(false);
-        setBulkMessage('');
-        setSelectedIds(new Set());
-        fetchCompanies();
-      } else {
-        alert('Erro ao iniciar disparo. Verifique se o WhatsApp está conectado.');
-      }
-    } catch (e) { console.error(e); alert('Erro de conexão'); }
-    finally { setIsSendingBulk(false); }
+  const createCampaign = async () => {
+      if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione empresas e dê um nome à campanha.');
+      
+      try {
+          const res = await fetch('/api/campaigns', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  ...newCampaign,
+                  leads: Array.from(selectedIds)
+              })
+          });
+          if (res.ok) {
+              alert('Campanha criada e envios iniciados!');
+              setIsCreatingCampaign(false);
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert('Erro ao criar campanha');
+          }
+      } catch (e) { alert('Erro de conexão'); }
   };
 
   // --- Filtering Logic ---
@@ -370,6 +414,60 @@ const App: React.FC = () => {
     </div>
   );
 
+  const CompanyTable = ({ selectable = false }) => (
+      <div className="card-premium overflow-hidden relative">
+        <table className="w-full text-sm text-left mt-2">
+          <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+            <tr>
+              {selectable && (
+                <th className="px-4 py-4 w-10 text-center">
+                    <button onClick={toggleSelectAll} className="hover:text-brand-600">
+                    {selectedIds.size === filteredCompanies.length && filteredCompanies.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
+                    </button>
+                </th>
+              )}
+              <th className="px-6 py-4">Empresa</th>
+              <th className="px-6 py-4">Situação</th>
+              <th className="px-6 py-4">Status WhatsApp</th>
+              <th className="px-6 py-4">Motivo</th>
+              <th className="px-6 py-4">Município</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filteredCompanies.slice(0, 100).map((company) => (
+              <tr key={company.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(company.id) ? 'bg-brand-50/30' : ''}`}>
+                {selectable && (
+                    <td className="px-4 py-4 text-center">
+                    <button onClick={() => toggleSelection(company.id)} className={`${selectedIds.has(company.id) ? 'text-brand-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                        {selectedIds.has(company.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                    </button>
+                    </td>
+                )}
+                <td className="px-6 py-4">
+                  <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
+                  <p className="text-xs text-slate-500">{company.inscricaoEstadual}</p>
+                </td>
+                <td className="px-6 py-4">
+                  <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {company.situacaoCadastral}
+                  </span>
+                </td>
+                <td className="px-6 py-4">
+                     <span className="bg-slate-100 px-2 py-1 rounded text-xs">{company.campaignStatus || 'Pendente'}</span>
+                </td>
+                <td className="px-6 py-4 text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
+                    {company.motivoSituacao || 'N/D'}
+                </td>
+                <td className="px-6 py-4">{company.municipio}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+  );
+
   // --- Render ---
 
   return (
@@ -394,7 +492,7 @@ const App: React.FC = () => {
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { id: 'import', icon: Upload, label: 'Importar PDF' },
             { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' },
-            { id: 'campaigns', icon: Trello, label: 'Gestão de Campanhas' },
+            { id: 'campaigns', icon: Rocket, label: 'Gestão de Campanhas' },
             { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', badge: waSession.status === 'connected' ? 'On' : 'Off' },
             { id: 'knowledge', icon: BookOpen, label: 'Base de Conhecimento' },
             { id: 'settings', icon: Settings, label: 'Configurações' },
@@ -431,10 +529,10 @@ const App: React.FC = () => {
             {activeTab === 'dashboard' && 'Visão Geral'}
             {activeTab === 'import' && 'Importação de Dados'}
             {activeTab === 'companies' && 'Base de Empresas'}
-            {activeTab === 'campaigns' && 'Funil de Vendas'}
+            {activeTab === 'campaigns' && 'Campanhas de Marketing'}
             {activeTab === 'whatsapp' && 'Atendimento'}
             {activeTab === 'knowledge' && 'Base de Conhecimento'}
-            {activeTab === 'settings' && 'Configurações do Sistema'}
+            {activeTab === 'settings' && 'Configurações'}
           </h1>
         </header>
 
@@ -448,7 +546,7 @@ const App: React.FC = () => {
                   { label: 'Total na Base', value: stats.total, color: 'text-brand-600', bg: 'bg-brand-50' },
                   { label: 'Sucesso Scraper', value: stats.success, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                   { label: 'Erros Leitura', value: stats.errors, color: 'text-rose-600', bg: 'bg-rose-50' },
-                  { label: 'Campanhas Ativas', value: companies.filter(c => c.campaignStatus !== 'pending').length, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  { label: 'Campanhas Ativas', value: campaigns.length, color: 'text-amber-600', bg: 'bg-amber-50' },
                 ].map((stat, i) => (
                   <div key={i} className="card-premium p-6 hover:-translate-y-1 transition-transform">
                     <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
@@ -504,9 +602,9 @@ const App: React.FC = () => {
 
           {/* IMPORTAÇÃO */}
           {activeTab === 'import' && (
-            <div className="max-w-2xl mx-auto mt-10 space-y-8">
-              {!currentProcessId ? (
-                <div className="card-premium p-10 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-all group cursor-pointer relative bg-white">
+            <div className="space-y-8">
+              {!currentProcessId && (
+                <div className="max-w-xl mx-auto card-premium p-10 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-all group cursor-pointer relative bg-white">
                   <input 
                     type="file" 
                     accept=".pdf" 
@@ -530,17 +628,18 @@ const App: React.FC = () => {
                   <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
                     <Upload size={40} />
                   </div>
-                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Upload de PDF da SEFAZ</h3>
-                  <p className="text-slate-500 text-lg">Arraste o arquivo ou clique para selecionar</p>
+                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Nova Importação SEFAZ</h3>
+                  <p className="text-slate-500 text-lg">Arraste o PDF ou clique para selecionar</p>
                 </div>
-              ) : (
-                <div className="card-premium p-8 text-center animate-fade-in">
+              )}
+
+              {currentProcessId && (
+                <div className="max-w-2xl mx-auto card-premium p-8 text-center animate-fade-in">
                   <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
                     <RefreshCw size={32} className="animate-spin" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800 mb-2">Processando PDF...</h3>
                   <p className="text-slate-500 mb-6">O robô está consultando a SEFAZ. Por favor aguarde.</p>
-                  
                   <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden mb-2">
                     <div 
                       className={`bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out ${processProgress.status === 'error' ? 'bg-rose-500' : ''}`}
@@ -550,15 +649,54 @@ const App: React.FC = () => {
                   <p className="text-sm font-medium text-slate-600">
                     {processProgress.processed} de {processProgress.total} empresas consultadas
                   </p>
-                  {processProgress.status === 'error' && (
-                     <p className="text-rose-500 font-bold mt-2">Ocorreu um erro no processamento.</p>
-                  )}
                 </div>
               )}
-              
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3 text-amber-800 text-sm">
-                <AlertCircle className="shrink-0" size={20} />
-                <p>O processo de raspagem pode levar alguns minutos dependendo do tamanho do PDF e da velocidade do site da SEFAZ.</p>
+
+              <div className="card-premium p-6">
+                  <h3 className="text-lg font-bold mb-4 text-slate-800">Gerenciador de Arquivos</h3>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-600 font-medium">
+                              <tr>
+                                  <th className="px-4 py-3">Nome do Arquivo</th>
+                                  <th className="px-4 py-3">Data Importação</th>
+                                  <th className="px-4 py-3">Total Registros</th>
+                                  <th className="px-4 py-3">Status</th>
+                                  <th className="px-4 py-3 text-right">Ações</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                              {imports.map(imp => (
+                                  <tr key={imp.id} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 font-medium text-slate-800">{imp.filename}</td>
+                                      <td className="px-4 py-3 text-slate-500">{new Date(imp.date).toLocaleDateString()}</td>
+                                      <td className="px-4 py-3 text-slate-600">{imp.total}</td>
+                                      <td className="px-4 py-3">
+                                          <span className={`text-xs px-2 py-1 rounded-full ${imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                              {imp.status === 'completed' ? 'Sucesso' : imp.status}
+                                          </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-right flex justify-end gap-2">
+                                          <button 
+                                              onClick={() => retryImport(imp.id)}
+                                              title="Reprocessar (Scraping novamente)"
+                                              className="p-2 text-brand-600 hover:bg-brand-50 rounded-lg"
+                                          >
+                                              <RefreshCw size={16}/>
+                                          </button>
+                                          <button 
+                                              onClick={() => deleteImport(imp.id)}
+                                              title="Excluir (Remove empresas e arquivo)"
+                                              className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
+                                          >
+                                              <Trash2 size={16}/>
+                                          </button>
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
               </div>
             </div>
           )}
@@ -567,129 +705,164 @@ const App: React.FC = () => {
           {activeTab === 'companies' && (
             <div className="space-y-6">
               <FilterBar />
-
-              <div className="card-premium overflow-hidden relative">
-                {selectedIds.size > 0 && (
-                  <div className="absolute top-0 left-0 w-full bg-brand-50 border-b border-brand-100 px-6 py-2 flex items-center justify-between z-10 animate-fade-in">
-                     <span className="text-sm font-bold text-brand-700">{selectedIds.size} empresas selecionadas</span>
-                     <button 
-                       onClick={() => setIsMessageModalOpen(true)}
-                       className="btn-primary py-1.5 px-4 text-xs flex items-center gap-2"
-                     >
-                       <Send size={14} /> Iniciar Campanha
-                     </button>
-                  </div>
-                )}
-                <table className="w-full text-sm text-left mt-2">
-                  <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
-                    <tr>
-                      <th className="px-4 py-4 w-10 text-center">
-                        <button onClick={toggleSelectAll} className="hover:text-brand-600">
-                           {selectedIds.size === filteredCompanies.length ? <CheckSquare size={18} /> : <Square size={18} />}
-                        </button>
-                      </th>
-                      <th className="px-6 py-4">Empresa</th>
-                      <th className="px-6 py-4">Localização</th>
-                      <th className="px-6 py-4">Contato</th>
-                      <th className="px-6 py-4">Situação</th>
-                      <th className="px-6 py-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredCompanies.slice(0, 100).map((company) => (
-                      <tr key={company.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(company.id) ? 'bg-brand-50/30' : ''}`}>
-                        <td className="px-4 py-4 text-center">
-                           <button onClick={() => toggleSelection(company.id)} className={`${selectedIds.has(company.id) ? 'text-brand-600' : 'text-slate-300 hover:text-slate-400'}`}>
-                              {selectedIds.has(company.id) ? <CheckSquare size={18} /> : <Square size={18} />}
-                           </button>
-                        </td>
-                        <td className="px-6 py-4">
-                          <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
-                          <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                            <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{company.inscricaoEstadual}</span>
-                            {company.nomeContador ? (
-                                <span className="text-emerald-600 flex items-center gap-1"><User size={10}/> {company.nomeContador}</span>
-                            ) : (
-                              <span className="text-rose-400 flex items-center gap-1"><AlertCircle size={10}/> Sem contador</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-slate-600">{company.municipio}</td>
-                        <td className="px-6 py-4">
-                          {company.telefone ? (
-                            <span className="flex items-center gap-1.5 text-slate-700">
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                              {company.telefone}
-                            </span>
-                          ) : <span className="text-slate-400 italic">Não informado</span>}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
-                            company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                          }`}>
-                            {company.situacaoCadastral}
-                          </span>
-                          {company.motivoSituacao && (
-                            <p className="text-xs text-slate-500 mt-1 max-w-[200px] truncate" title={company.motivoSituacao}>
-                              {company.motivoSituacao}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">{renderStatusBadge(company.status)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <CompanyTable selectable={false} />
             </div>
           )}
 
-          {/* CAMPANHAS (KANBAN) */}
+          {/* CAMPANHAS - WIZARD E LISTAGEM */}
           {activeTab === 'campaigns' && (
-            <div className="h-[calc(100vh-140px)] flex flex-col">
-               <FilterBar />
+            <div className="space-y-6">
                
-               <div className="flex gap-4 overflow-x-auto pb-4 flex-1">
-                  {[
-                    { id: 'pending', title: 'Pendente', color: 'bg-slate-100 border-slate-200' },
-                    { id: 'sent', title: 'Enviado', color: 'bg-blue-50 border-blue-200' },
-                    { id: 'replied', title: 'Respondido', color: 'bg-amber-50 border-amber-200' },
-                    { id: 'interested', title: 'Interessado', color: 'bg-emerald-50 border-emerald-200' },
-                    { id: 'not_interested', title: 'Descartado', color: 'bg-rose-50 border-rose-200' }
-                  ].map(col => {
-                    const items = filteredCompanies.filter(c => c.campaignStatus === col.id || (col.id === 'pending' && !c.campaignStatus));
-                    return (
-                      <div key={col.id} className={`min-w-[300px] w-[300px] rounded-xl border flex flex-col ${col.color}`}>
-                        <div className="p-4 font-bold text-slate-700 flex justify-between">
-                          {col.title}
-                          <span className="bg-white px-2 py-0.5 rounded text-sm shadow-sm">{items.length}</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-                          {items.slice(0, 50).map(c => (
-                            <div key={c.id} className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-grab">
-                              <p className="font-semibold text-sm text-slate-800 mb-1">{c.razaoSocial}</p>
-                              <p className="text-xs text-slate-500 mb-2">{c.municipio}</p>
-                              {c.motivoSituacao && (
-                                <p className="text-[10px] text-rose-500 bg-rose-50 px-1 py-0.5 rounded inline-block mb-2 max-w-full truncate">
-                                   {c.motivoSituacao}
-                                </p>
-                              )}
-                              <div className="flex justify-between items-center mt-2 border-t border-slate-50 pt-2">
-                                {c.telefone ? (
-                                  <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded flex items-center gap-1">
-                                    <MessageCircle size={10} /> WhatsApp
-                                  </span>
-                                ) : (
-                                  <span className="text-xs text-slate-400">Sem telefone</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
-               </div>
+               {!isCreatingCampaign ? (
+                   // LISTAGEM DE CAMPANHAS
+                   <div className="space-y-6">
+                       <div className="flex justify-between items-center">
+                           <h2 className="text-xl font-bold text-slate-700">Minhas Campanhas</h2>
+                           <button onClick={() => setIsCreatingCampaign(true)} className="btn-primary flex items-center gap-2">
+                               <Plus size={18}/> Nova Campanha
+                           </button>
+                       </div>
+
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                           {campaigns.map(c => (
+                               <div key={c.id} className="card-premium p-6 group">
+                                   <div className="flex justify-between items-start mb-4">
+                                       <div className="p-3 bg-brand-50 text-brand-600 rounded-xl">
+                                           <Rocket size={24}/>
+                                       </div>
+                                       <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full uppercase">
+                                           Ativa
+                                       </span>
+                                   </div>
+                                   <h3 className="font-bold text-lg text-slate-800 mb-2">{c.name}</h3>
+                                   <p className="text-sm text-slate-500 line-clamp-2 mb-6 h-10">{c.description || 'Sem descrição'}</p>
+                                   
+                                   <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-4">
+                                       <div>
+                                           <p className="text-xs text-slate-400 uppercase">Total</p>
+                                           <p className="font-bold text-slate-700">{c.stats?.total || 0}</p>
+                                       </div>
+                                       <div>
+                                           <p className="text-xs text-slate-400 uppercase">Enviados</p>
+                                           <p className="font-bold text-brand-600">{c.stats?.sent || 0}</p>
+                                       </div>
+                                       <div>
+                                           <p className="text-xs text-slate-400 uppercase">Respostas</p>
+                                           <p className="font-bold text-emerald-600">{c.stats?.replied || 0}</p>
+                                       </div>
+                                   </div>
+                               </div>
+                           ))}
+                           {campaigns.length === 0 && (
+                               <div className="col-span-full py-10 text-center text-slate-400 bg-white rounded-xl border border-dashed border-slate-300">
+                                   <p>Nenhuma campanha criada ainda.</p>
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               ) : (
+                   // WIZARD DE CRIAÇÃO
+                   <div className="max-w-5xl mx-auto">
+                       <div className="mb-8 flex items-center justify-between">
+                           <div>
+                               <h2 className="text-2xl font-bold text-slate-800">Criar Nova Campanha</h2>
+                               <p className="text-slate-500">Configure uma nova campanha de contato com empresas</p>
+                           </div>
+                           <button onClick={() => setIsCreatingCampaign(false)} className="text-slate-400 hover:text-slate-600"><X size={24}/></button>
+                       </div>
+
+                       {/* STEPS */}
+                       <div className="flex items-center mb-8 px-4">
+                           <div className={`flex-1 h-2 rounded-full mr-2 ${campaignStep >= 1 ? 'bg-brand-500' : 'bg-slate-200'}`}></div>
+                           <div className={`flex-1 h-2 rounded-full mr-2 ${campaignStep >= 2 ? 'bg-brand-500' : 'bg-slate-200'}`}></div>
+                           <div className={`flex-1 h-2 rounded-full ${campaignStep >= 3 ? 'bg-brand-500' : 'bg-slate-200'}`}></div>
+                       </div>
+                       
+                       <div className="flex justify-between mb-8 px-2 text-sm font-semibold text-slate-600">
+                           <span className={campaignStep === 1 ? 'text-brand-600' : ''}>Configuração</span>
+                           <span className={campaignStep === 2 ? 'text-brand-600' : ''}>Empresas ({selectedIds.size})</span>
+                           <span className={campaignStep === 3 ? 'text-brand-600' : ''}>IA & Templates</span>
+                       </div>
+
+                       {/* STEP CONTENT */}
+                       <div className="card-premium p-8 min-h-[400px]">
+                           {campaignStep === 1 && (
+                               <div className="max-w-xl mx-auto space-y-6">
+                                   <div>
+                                       <label className="block text-sm font-bold text-slate-700 mb-2">Nome da Campanha</label>
+                                       <input 
+                                           className="input-premium" 
+                                           placeholder="Ex: Recuperação Fiscal - Salvador"
+                                           value={newCampaign.name}
+                                           onChange={e => setNewCampaign({...newCampaign, name: e.target.value})}
+                                       />
+                                   </div>
+                                   <div>
+                                       <label className="block text-sm font-bold text-slate-700 mb-2">Descrição (Opcional)</label>
+                                       <textarea 
+                                           className="input-premium h-32" 
+                                           placeholder="Objetivo desta campanha..."
+                                           value={newCampaign.description}
+                                           onChange={e => setNewCampaign({...newCampaign, description: e.target.value})}
+                                       />
+                                   </div>
+                                   <div className="flex justify-end pt-4">
+                                       <button onClick={() => setCampaignStep(2)} className="btn-primary">Próximo &rarr;</button>
+                                   </div>
+                               </div>
+                           )}
+
+                           {campaignStep === 2 && (
+                               <div className="space-y-4">
+                                   <FilterBar />
+                                   <div className="bg-amber-50 p-3 rounded-lg text-amber-800 text-sm flex gap-2">
+                                       <AlertCircle size={18}/>
+                                       Selecione as empresas que receberão esta campanha. Use os filtros acima para segmentar.
+                                   </div>
+                                   <div className="h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
+                                      <CompanyTable selectable={true} />
+                                   </div>
+                                   <div className="flex justify-between pt-4">
+                                       <button onClick={() => setCampaignStep(1)} className="btn-secondary">&larr; Voltar</button>
+                                       <div className="flex items-center gap-4">
+                                           <span className="font-bold text-brand-600">{selectedIds.size} selecionadas</span>
+                                           <button onClick={() => setCampaignStep(3)} className="btn-primary" disabled={selectedIds.size === 0}>Próximo &rarr;</button>
+                                       </div>
+                                   </div>
+                               </div>
+                           )}
+
+                           {campaignStep === 3 && (
+                               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                   <div>
+                                       <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><MessageSquare size={18}/> Mensagem Inicial</h3>
+                                       <p className="text-xs text-slate-500 mb-2">Esta mensagem será enviada para iniciar a conversa.</p>
+                                       <textarea 
+                                           className="input-premium h-64 resize-none"
+                                           value={newCampaign.initialMessage}
+                                           onChange={e => setNewCampaign({...newCampaign, initialMessage: e.target.value})}
+                                       />
+                                   </div>
+                                   <div>
+                                       <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Sparkles size={18}/> Comportamento da IA</h3>
+                                       <p className="text-xs text-slate-500 mb-2">Instruções específicas para a IA nesta campanha.</p>
+                                       <textarea 
+                                           className="input-premium h-64 resize-none font-mono text-sm"
+                                           value={newCampaign.aiPersona}
+                                           onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})}
+                                       />
+                                   </div>
+                                   <div className="col-span-full flex justify-between pt-4 border-t border-slate-100">
+                                       <button onClick={() => setCampaignStep(2)} className="btn-secondary">&larr; Voltar</button>
+                                       <button onClick={createCampaign} className="btn-primary bg-emerald-600 hover:bg-emerald-500">
+                                           <Rocket size={18} className="mr-2"/> Criar e Disparar
+                                       </button>
+                                   </div>
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               )}
             </div>
           )}
 
@@ -985,78 +1158,11 @@ const App: React.FC = () => {
                        onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
                     />
                  </div>
-
-                 <div className="card-premium p-6">
-                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                       <Settings className="text-brand-500" size={20} />
-                       Parâmetros do Modelo
-                    </h3>
-                    <div className="grid grid-cols-2 gap-6">
-                       <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-2">Modelo Gemini</label>
-                          <select 
-                             className="input-premium"
-                             value={aiConfig.model}
-                             onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
-                          >
-                             <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recomendado)</option>
-                             <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                          </select>
-                       </div>
-                    </div>
-                 </div>
               </div>
            )}
 
         </div>
       </main>
-
-      {/* Modal de Envio em Massa */}
-      {isMessageModalOpen && (
-         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-slide-up">
-               <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                     <Send className="text-brand-600" size={24}/> Iniciar Campanha
-                  </h3>
-                  <button onClick={() => setIsMessageModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={24}/></button>
-               </div>
-               
-               <p className="text-sm text-slate-600 mb-4">
-                  Você está prestes a enviar mensagens para <b>{selectedIds.size}</b> empresas.
-               </p>
-
-               <div className="mb-4">
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">Mensagem Inicial</label>
-                  <textarea 
-                     className="input-premium h-32 resize-none"
-                     placeholder="Olá, vi que sua empresa está com pendências na SEFAZ..."
-                     value={bulkMessage}
-                     onChange={e => setBulkMessage(e.target.value)}
-                  />
-                  <p className="text-xs text-slate-400 mt-2">Dica: Seja direto e cordial. A IA assumirá a conversa após a resposta do cliente.</p>
-               </div>
-
-               <div className="flex justify-end gap-3">
-                  <button 
-                     onClick={() => setIsMessageModalOpen(false)}
-                     className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium"
-                  >
-                     Cancelar
-                  </button>
-                  <button 
-                     onClick={handleBulkSend}
-                     disabled={isSendingBulk || !bulkMessage.trim()}
-                     className="btn-primary flex items-center gap-2"
-                  >
-                     {isSendingBulk ? <RefreshCw className="animate-spin" size={18}/> : <Send size={18}/>}
-                     {isSendingBulk ? 'Enviando...' : 'Confirmar Envio'}
-                  </button>
-               </div>
-            </div>
-         </div>
-      )}
-
     </div>
   );
 };

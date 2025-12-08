@@ -34,6 +34,7 @@ const db = new sqlite3.Database(dbPath);
 
 // Inicialização das Tabelas
 db.serialize(() => {
+    // Tabela de Importações (Consultas)
     db.run(`CREATE TABLE IF NOT EXISTS consulta (
         id TEXT PRIMARY KEY,
         filename TEXT,
@@ -44,9 +45,22 @@ db.serialize(() => {
         end_time DATETIME
     )`);
 
+    // Tabela de Campanhas
+    db.run(`CREATE TABLE IF NOT EXISTS campaign (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        initial_message TEXT,
+        ai_persona TEXT,
+        status TEXT DEFAULT 'active',
+        created_at DATETIME
+    )`);
+
+    // Tabela de Resultados (Leads)
     db.run(`CREATE TABLE IF NOT EXISTS resultado (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         consulta_id TEXT,
+        campaign_id TEXT,
         inscricao_estadual TEXT,
         cnpj TEXT,
         razao_social TEXT,
@@ -70,8 +84,16 @@ db.serialize(() => {
         campaign_status TEXT DEFAULT 'pending',
         last_contacted DATETIME,
         notes TEXT,
-        FOREIGN KEY(consulta_id) REFERENCES consulta(id)
+        FOREIGN KEY(consulta_id) REFERENCES consulta(id),
+        FOREIGN KEY(campaign_id) REFERENCES campaign(id)
     )`);
+    
+    // Migração segura para adicionar coluna campaign_id se não existir
+    db.all("PRAGMA table_info(resultado)", (err, rows) => {
+        if (!rows.some(r => r.name === 'campaign_id')) {
+            db.run("ALTER TABLE resultado ADD COLUMN campaign_id TEXT REFERENCES campaign(id)");
+        }
+    });
 });
 
 // Helper Functions DB
@@ -107,10 +129,12 @@ const upload = multer({ storage });
 const API_KEY = process.env.API_KEY || process.env.GOOGLE_API_KEY;
 let activeRules = []; 
 const disabledAI = new Set();
+let globalPersona = ""; // Persona padrão
 
 app.post('/api/config/ai-rules', (req, res) => {
-    const { rules } = req.body;
+    const { rules, persona } = req.body;
     activeRules = rules || [];
+    if (persona) globalPersona = persona;
     res.json({ success: true });
 });
 
@@ -155,12 +179,21 @@ client.on('message', async msg => {
 
     try {
         let contextData = null;
+        let campaignPersona = null;
+
         try {
-            // Safe contact lookup com try/catch silencioso para evitar crash
             const contact = await msg.getContact().catch(() => null);
             if (contact && contact.number) {
                 const cleanPhone = contact.number.replace(/\D/g, '').slice(-8);
-                const row = await getOne("SELECT * FROM resultado WHERE telefone LIKE ?", [`%${cleanPhone}`]);
+                // Busca o cliente e também os dados da campanha se houver
+                const row = await getOne(`
+                    SELECT r.*, c.ai_persona as campaign_persona 
+                    FROM resultado r 
+                    LEFT JOIN campaign c ON r.campaign_id = c.id 
+                    WHERE r.telefone LIKE ?
+                    ORDER BY r.id DESC LIMIT 1
+                `, [`%${cleanPhone}`]);
+
                 if (row) {
                     contextData = {
                         razaoSocial: row.razao_social,
@@ -169,7 +202,10 @@ client.on('message', async msg => {
                         motivoSituacao: row.motivo_situacao_cadastral
                     };
                     
-                    // Atualiza status se o cliente respondeu e estava pendente ou enviado
+                    if (row.campaign_persona) {
+                        campaignPersona = row.campaign_persona;
+                    }
+                    
                     if (row.campaign_status === 'sent' || row.campaign_status === 'pending') {
                          await runQuery("UPDATE resultado SET campaign_status = 'replied' WHERE id = ?", [row.id]);
                     }
@@ -179,14 +215,15 @@ client.on('message', async msg => {
             console.warn('[AI] Context lookup skipped:', err.message); 
         }
 
-        let systemInstruction = `Você é um assistente comercial da CRM VIRGULA.`;
+        // Define a Persona: Prioridade Campanha > Global > Padrão
+        let systemInstruction = campaignPersona || globalPersona || `Você é um assistente comercial da CRM VIRGULA.`;
+        
         if (contextData) {
             systemInstruction += `\n\nContexto do Cliente:
             Empresa: ${contextData.razaoSocial}
             Situação na SEFAZ: ${contextData.situacao}
             Motivo da Inaptidão: ${contextData.motivoSituacao}`;
             
-            // Busca regra correspondente
             if (activeRules && activeRules.length > 0 && contextData.motivoSituacao) {
                 const matchingRule = activeRules.find(r => r.motivoSituacao && contextData.motivoSituacao.includes(r.motivoSituacao));
                 if (matchingRule && matchingRule.instructions) {
@@ -238,42 +275,45 @@ initializeWhatsApp();
 async function runScraping(processId, filepath, isReprocess = false) {
     let ies = [];
     
-    if (isReprocess) {
-        const rows = await getQuery("SELECT inscricao_estadual FROM resultado WHERE consulta_id = ?", [processId]);
-        ies = rows.map(r => r.inscricao_estadual);
-        console.log(`[Scraper] Reprocessando ${ies.length} IEs`);
-    } else {
-        try {
-            console.log(`[Scraper] Lendo PDF: ${filepath}`);
-            const dataBuffer = fs.readFileSync(filepath);
-            const data = await pdf(dataBuffer);
-            
-            // Texto Bruto Normalizado (sem espaços) para evitar problemas de kerning
-            // Ex: "2 0 1 . 5 7 6" vira "201.576"
-            const rawText = data.text;
-            const normalizedText = rawText.replace(/\s+/g, ''); 
-            
-            // Regex que busca o padrão XX.XXX.XXX- no texto normalizado
-            const regexNormalized = /(\d{1,3}\.\d{1,3}\.\d{1,3})-/g;
-            const matches = [...normalizedText.matchAll(regexNormalized)];
-            
-            const foundIes = matches.map(m => m[1].replace(/\D/g, ''));
-            
-            // Filtra duplicatas e IEs inválidas
-            ies = [...new Set(foundIes)].filter(ie => ie.length >= 8);
-
-            console.log(`[Scraper] Encontradas ${ies.length} IEs únicas no PDF (Normalizado)`);
-        } catch (e) {
-            console.error("[Scraper] Erro ao ler PDF:", e);
+    // Verifica se arquivo existe, se não, tenta recuperar do DB se for reprocess
+    if (!fs.existsSync(filepath)) {
+        // Se for reprocess e não tem arquivo, tenta usar só o DB se tiver dados lá.
+        // Mas se o objetivo é "Refresh" (re-ler), precisamos do arquivo.
+        // Assumindo que o arquivo está lá.
+        if (!isReprocess) {
+            console.error(`[Scraper] Arquivo não encontrado: ${filepath}`);
             await runQuery("UPDATE consulta SET status = 'error' WHERE id = ?", [processId]);
             return;
         }
     }
 
+    try {
+        console.log(`[Scraper] Iniciando leitura PDF: ${filepath}`);
+        const dataBuffer = fs.readFileSync(filepath);
+        const data = await pdf(dataBuffer);
+        
+        const rawText = data.text;
+        const normalizedText = rawText.replace(/\s+/g, ''); 
+        const regexNormalized = /(\d{1,3}\.\d{1,3}\.\d{1,3})-/g;
+        const matches = [...normalizedText.matchAll(regexNormalized)];
+        const foundIes = matches.map(m => m[1].replace(/\D/g, ''));
+        ies = [...new Set(foundIes)].filter(ie => ie.length >= 8);
+        console.log(`[Scraper] Encontradas ${ies.length} IEs únicas`);
+
+    } catch (e) {
+        console.error("[Scraper] Erro ao ler PDF:", e);
+        if (!isReprocess) {
+            await runQuery("UPDATE consulta SET status = 'error' WHERE id = ?", [processId]);
+            return;
+        }
+        // Se falhar PDF no reprocess, tentamos pegar do DB existente
+        const rows = await getQuery("SELECT inscricao_estadual FROM resultado WHERE consulta_id = ?", [processId]);
+        ies = rows.map(r => r.inscricao_estadual);
+    }
+
     if (ies.length === 0) {
-        console.warn("[Scraper] Nenhuma IE encontrada. Verifique o formato do PDF.");
+        console.warn("[Scraper] Nenhuma IE encontrada.");
         await runQuery("UPDATE consulta SET status = 'error', processed = 0 WHERE id = ?", [processId]);
-        // Em vez de 'completed', marcamos erro se não achou nada para alertar o usuário
         return;
     }
 
@@ -281,7 +321,6 @@ async function runScraping(processId, filepath, isReprocess = false) {
 
     let browser = null;
     try {
-        console.log("[Scraper] Iniciando Browser...");
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
@@ -295,20 +334,12 @@ async function runScraping(processId, filepath, isReprocess = false) {
         for (let i = 0; i < ies.length; i++) {
             const ie = ies[i];
             try {
-                // Navegação com tolerância
-                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { 
-                    waitUntil: 'networkidle2', 
-                    timeout: 60000 
-                });
-                
+                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { waitUntil: 'networkidle2', timeout: 60000 });
                 const inputSelector = 'input[name="IE"]';
                 await page.waitForSelector(inputSelector, { timeout: 30000 });
-                
-                // Limpa e digita
                 await page.$eval(inputSelector, el => el.value = '');
                 await page.type(inputSelector, ie);
 
-                // Clica no botão de consulta e espera
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
                     page.click("input[type='submit'][name='B2']")
@@ -319,33 +350,24 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 const bodyText = $('body').text();
 
                 if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
-                     // Helper de extração
                      const extract = (label) => {
                         const el = $('b').filter((i, el) => {
                             const t = $(el).text().replace(/\s+/g, ' ').trim();
                             return t.includes(label);
                         }).first();
-
-                        if (el.length && el[0].nextSibling && el[0].nextSibling.nodeType === 3) {
-                            return $(el[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
-                        }
+                        if (el.length && el[0].nextSibling) return $(el[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
                         if (el.length) return el.parent().text().replace(label, '').trim();
                         return null;
                     };
 
-                    // Extração de Atividade Econômica (Mesma lógica do Python: Linha de baixo)
                     let atividade = '';
                     const ativLabel = $('b').filter((i, el) => {
                         const t = $(el).text();
                         return t.includes('Atividade Econômica') || t.includes('Atividade Econômica Principal');
                     });
-                    
                     if (ativLabel.length) {
-                        const parentTr = ativLabel.closest('tr');
-                        const nextTr = parentTr.next('tr');
-                        if (nextTr.length) {
-                            atividade = nextTr.text().replace(/&nbsp;/g, ' ').trim();
-                        }
+                        const nextTr = ativLabel.closest('tr').next('tr');
+                        if (nextTr.length) atividade = nextTr.text().replace(/&nbsp;/g, ' ').trim();
                     }
 
                     const dados = {
@@ -360,48 +382,87 @@ async function runScraping(processId, filepath, isReprocess = false) {
                         atividade_economica_principal: atividade
                     };
 
-                    if (isReprocess) {
-                        await runQuery(`UPDATE resultado SET situacao_cadastral = ?, motivo_situacao_cadastral = ?, status = 'Sucesso' WHERE consulta_id = ? AND inscricao_estadual = ?`, 
-                        [dados.situacao, dados.motivo, processId, ie]);
+                    // Verifica se já existe para atualizar ou inserir
+                    const existing = await getOne("SELECT id FROM resultado WHERE consulta_id = ? AND inscricao_estadual = ?", [processId, ie]);
+                    
+                    if (existing) {
+                        await runQuery(`UPDATE resultado SET cnpj=?, razao_social=?, municipio=?, telefone=?, situacao_cadastral=?, motivo_situacao_cadastral=?, nome_contador=?, atividade_economica_principal=?, status='Sucesso' WHERE id=?`, 
+                        [dados.cnpj, dados.razao_social, dados.municipio, dados.telefone, dados.situacao, dados.motivo, dados.contador, dados.atividade_economica_principal, existing.id]);
                     } else {
                         await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, cnpj, razao_social, municipio, telefone, situacao_cadastral, motivo_situacao_cadastral, nome_contador, atividade_economica_principal, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`, 
                         [processId, ie, dados.cnpj, dados.razao_social, dados.municipio, dados.telefone, dados.situacao, dados.motivo, dados.contador, dados.atividade_economica_principal]);
                     }
+
                 } else {
-                     const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro na página ou bloqueio';
-                     if (!isReprocess) {
-                         await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${erroMsg}`]);
+                     const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro página';
+                     const existing = await getOne("SELECT id FROM resultado WHERE consulta_id = ? AND inscricao_estadual = ?", [processId, ie]);
+                     if (!existing) {
+                        await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${erroMsg}`]);
+                     } else {
+                        await runQuery("UPDATE resultado SET status = ? WHERE id = ?", [`Erro: ${erroMsg}`, existing.id]);
                      }
                 }
             } catch (err) {
-                console.error(`[Scraper] Erro ao processar IE ${ie}:`, err.message);
-                if (!isReprocess) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
+                console.error(`[Scraper] Erro IE ${ie}:`, err.message);
+                const existing = await getOne("SELECT id FROM resultado WHERE consulta_id = ? AND inscricao_estadual = ?", [processId, ie]);
+                if (!existing) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
             }
             await runQuery("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
-            await new Promise(r => setTimeout(r, 1000));
         }
-    } catch (e) { 
-        console.error("[Scraper] Erro fatal no browser:", e); 
-    } finally {
+    } catch (e) { console.error("[Scraper] Fatal:", e); } 
+    finally {
         if (browser) await browser.close();
-        console.log(`[Scraper] Finalizado processo ${processId}`);
         await runQuery("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
     }
 }
 
 // --- Rotas API ---
 
+// IMPORTAÇÕES
 app.post('/start-processing', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo' });
     const processId = uuidv4();
     try {
         await runQuery("INSERT INTO consulta (id, filename, status, start_time) VALUES (?, ?, 'processing', ?)", 
             [processId, req.file.originalname, new Date().toISOString()]);
-        
-        // Roda em background
         runScraping(processId, req.file.path, false);
-        
         res.json({ processId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/imports/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const row = await getOne("SELECT filename FROM consulta WHERE id = ?", [id]);
+        if (row) {
+            const filepath = path.join(UPLOAD_FOLDER, row.filename); // Assumindo que filename é o original. 
+            // Na verdade, o multer salva com UUID, mas salvamos o originalname no DB.
+            // Correção: Para deletar o arquivo físico, precisaríamos ter salvo o path ou o filename do disco no DB.
+            // Simplificação: Deletamos os dados do banco. O arquivo físico será orfão (pode ser limpo via cron depois).
+            // Melhoria: Vamos deletar só do banco por segurança agora.
+        }
+        await runQuery("DELETE FROM resultado WHERE consulta_id = ?", [id]);
+        await runQuery("DELETE FROM consulta WHERE id = ?", [id]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/imports/retry/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        // Precisamos descobrir o nome do arquivo físico. 
+        // Como o multer salvou com UUID e não salvamos no banco o path, vamos tentar reprocessar usando as IEs que já estão no banco?
+        // Ou assumir que o arquivo é {uuid}.pdf se tivéssemos salvo.
+        // Solução Atual: Reprocessar usando o que temos no banco de dados (resultado) OU tentar achar o arquivo se tivéssemos salvo.
+        // Vamos forçar um scraping novo baseado nas IEs que já temos no banco para essa consulta.
+        
+        await runQuery("UPDATE consulta SET status = 'processing', processed = 0 WHERE id = ?", [id]);
+        
+        // Hack: Passamos um path falso, mas o runScraping vai pegar as IEs do banco porque o arquivo não vai existir
+        // e ele tem fallback para DB se falhar leitura.
+        runScraping(id, path.join(UPLOAD_FOLDER, 'dummy.pdf'), true); 
+        
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -430,13 +491,70 @@ app.get('/progress/:processId', async (req, res) => {
     req.on('close', () => clearInterval(interval));
 });
 
+// CAMPANHAS
+app.get('/api/campaigns', async (req, res) => {
+    const rows = await getQuery("SELECT * FROM campaign ORDER BY created_at DESC");
+    // Get stats for each campaign
+    const campaigns = await Promise.all(rows.map(async c => {
+        const stats = await getOne(`SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN campaign_status = 'sent' THEN 1 ELSE 0 END) as sent,
+            SUM(CASE WHEN campaign_status = 'replied' THEN 1 ELSE 0 END) as replied
+            FROM resultado WHERE campaign_id = ?`, [c.id]);
+        return { ...c, stats };
+    }));
+    res.json(campaigns);
+});
+
+app.post('/api/campaigns', async (req, res) => {
+    const { name, description, initialMessage, aiPersona, leads } = req.body;
+    const campaignId = uuidv4();
+    
+    try {
+        await runQuery(`INSERT INTO campaign (id, name, description, initial_message, ai_persona, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+            [campaignId, name, description, initialMessage, aiPersona, new Date().toISOString()]);
+        
+        // Link leads to campaign
+        if (leads && leads.length > 0) {
+            const placeholders = leads.map(() => '?').join(',');
+            await runQuery(`UPDATE resultado SET campaign_id = ?, campaign_status = 'pending' WHERE id IN (${placeholders})`, [campaignId, ...leads]);
+            
+            // Auto-Start Sending (Trigger Background)
+            // Se quiser envio imediato:
+            startBulkSend(leads, initialMessage, campaignId);
+        }
+        
+        res.json({ success: true, campaignId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function startBulkSend(ids, message, campaignId) {
+    if (whatsappStatus !== 'connected') return;
+    for (const id of ids) {
+        try {
+            const row = await getOne("SELECT telefone, razao_social FROM resultado WHERE id = ?", [id]);
+            if (row && row.telefone) {
+                let phone = row.telefone.replace(/\D/g, '');
+                if (phone.length <= 11) phone = '55' + phone; 
+                const chatId = phone + '@c.us';
+                
+                await new Promise(r => setTimeout(r, 8000 + Math.random() * 10000)); // Delay
+                
+                await client.sendMessage(chatId, message);
+                await runQuery(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ? WHERE id = ?`, [new Date().toISOString(), id]);
+                console.log(`[Campaign ${campaignId}] Enviado: ${row.razao_social}`);
+            }
+        } catch (e) { console.error(`[Campaign] Erro ID ${id}:`, e.message); }
+    }
+}
+
+// GETTERS
 app.get('/get-all-results', async (req, res) => {
     const rows = await getQuery("SELECT * FROM resultado ORDER BY id DESC");
     res.json(rows.map(r => ({
         id: r.id.toString(),
         inscricaoEstadual: r.inscricao_estadual,
         cnpj: r.cnpj,
-        razao_social: r.razao_social,
         razaoSocial: r.razao_social,
         municipio: r.municipio,
         telefone: r.telefone,
@@ -444,7 +562,8 @@ app.get('/get-all-results', async (req, res) => {
         motivoSituacao: r.motivo_situacao_cadastral,
         nomeContador: r.nome_contador,
         status: r.status,
-        campaignStatus: r.campaign_status
+        campaignStatus: r.campaign_status,
+        campaignId: r.campaign_id
     })));
 });
 
@@ -462,8 +581,7 @@ app.get('/api/unique-filters', async (req, res) => {
     });
 });
 
-// --- WhatsApp API Endpoints ---
-
+// WHATSAPP ENDPOINTS
 app.get('/api/whatsapp/chats', async (req, res) => {
     if (whatsappStatus !== 'connected') return res.json([]);
     try {
@@ -500,46 +618,6 @@ app.post('/api/whatsapp/send', async (req, res) => {
         await client.sendMessage(req.body.chatId, req.body.message);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Endpoint de Envio em Massa (Campaign)
-app.post('/api/campaigns/send-bulk', async (req, res) => {
-    const { ids, message } = req.body;
-    if (!ids || !ids.length || !message) return res.status(400).json({ error: 'Dados incompletos' });
-    if (whatsappStatus !== 'connected') return res.status(400).json({ error: 'WhatsApp desconectado' });
-
-    let sentCount = 0;
-    
-    // Roda em background para não travar a requisição
-    (async () => {
-        for (const id of ids) {
-            try {
-                const row = await getOne("SELECT * FROM resultado WHERE id = ?", [id]);
-                if (row && row.telefone) {
-                    // Formata o número (assume 55 se não tiver DDI, remove chars não numéricos)
-                    let phone = row.telefone.replace(/\D/g, '');
-                    if (phone.length <= 11) phone = '55' + phone; 
-                    
-                    const chatId = phone + '@c.us';
-                    
-                    // Delay aleatório anti-ban (5 a 15 segundos)
-                    await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000));
-                    
-                    await client.sendMessage(chatId, message);
-                    
-                    await runQuery(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ? WHERE id = ?`, 
-                        [new Date().toISOString(), id]);
-                    
-                    sentCount++;
-                    console.log(`[Campaign] Enviado para ${row.razao_social} (${phone})`);
-                }
-            } catch (err) {
-                console.error(`[Campaign] Erro ao enviar para ID ${id}:`, err.message);
-            }
-        }
-    })();
-
-    res.json({ success: true, message: 'Disparo iniciado em segundo plano' });
 });
 
 app.post('/api/whatsapp/toggle-ai', async (req, res) => {
