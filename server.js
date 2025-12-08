@@ -224,22 +224,31 @@ async function runScraping(processId, filepath, isReprocess = false) {
     if (isReprocess) {
         const rows = await getQuery("SELECT inscricao_estadual FROM resultado WHERE consulta_id = ?", [processId]);
         ies = rows.map(r => r.inscricao_estadual);
+        console.log(`[Scraper] Reprocessando ${ies.length} IEs`);
     } else {
         try {
+            console.log(`[Scraper] Lendo PDF: ${filepath}`);
             const dataBuffer = fs.readFileSync(filepath);
             const data = await pdf(dataBuffer);
-            const regex = /(\d{2,3}\.?\d{3}\.?\d{3}-?\d{2}|\d{8,9})/g;
+            console.log(`[Scraper] Texto extraído (${data.text.length} chars)`);
+            
+            // Regex mais flexível para capturar 8 ou 9 dígitos soltos ou formatados
+            const regex = /(\d{2,3}\.?\d{3}\.?\d{3}-?\d{2}|\b\d{8,9}\b)/g;
             const matches = data.text.match(regex);
+            
             if (matches) {
                 ies = [...new Set(matches.map(m => m.replace(/\D/g, '')))].filter(ie => ie.length >= 8);
             }
+            console.log(`[Scraper] Encontradas ${ies.length} IEs únicas no PDF`);
         } catch (e) {
+            console.error("[Scraper] Erro ao ler PDF:", e);
             await runQuery("UPDATE consulta SET status = 'error' WHERE id = ?", [processId]);
             return;
         }
     }
 
     if (ies.length === 0) {
+        console.warn("[Scraper] Nenhuma IE encontrada.");
         await runQuery("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
         return;
     }
@@ -248,53 +257,77 @@ async function runScraping(processId, filepath, isReprocess = false) {
 
     let browser = null;
     try {
+        console.log("[Scraper] Iniciando Browser...");
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-            args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+            args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-setuid-sandbox'],
+            ignoreHTTPSErrors: true
         });
 
         const page = await browser.newPage();
-        
+        // User Agent para evitar bloqueios simples
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
         for (let i = 0; i < ies.length; i++) {
             const ie = ies[i];
             try {
-                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { waitUntil: 'networkidle2', timeout: 30000 });
+                // console.log(`[Scraper] Consultando IE ${ie} (${i+1}/${ies.length})`);
                 
-                await page.waitForSelector('input[name="IE"]', { timeout: 10000 });
+                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                
+                await page.waitForSelector('input[name="IE"]', { timeout: 15000 });
+                
+                // Limpa e digita
                 await page.$eval('input[name="IE"]', el => el.value = '');
                 await page.type('input[name="IE"]', ie);
 
+                // Clica no botão
                 const btnClicked = await page.evaluate(() => {
-                    const btn = document.querySelector("input[type='submit'][name='B2'][value*='IE']");
+                    const btn = document.querySelector("input[type='submit'][name='B2']");
                     if (btn) { btn.click(); return true; }
                     return false;
                 });
 
                 if (btnClicked) {
-                    await page.waitForFunction(
-                        () => document.body.innerText.includes('Consulta Básica ao Cadastro do ICMS da Bahia') || document.body.innerText.includes('Não foram encontrados registros'),
-                        { timeout: 10000 }
-                    );
+                    // Espera resultado ou erro
+                    try {
+                        await page.waitForFunction(
+                            () => document.body.innerText.includes('Consulta Básica ao Cadastro do ICMS da Bahia') || 
+                                  document.body.innerText.includes('Não foram encontrados registros') ||
+                                  document.body.innerText.includes('CPF / CNPJ / IE Inválido'),
+                            { timeout: 15000 }
+                        );
+                    } catch (waitErr) {
+                        console.warn(`[Scraper] Timeout esperando resultado para ${ie}`);
+                        throw new Error("Timeout waiting for response");
+                    }
 
                     const html = await page.content();
                     const $ = cheerio.load(html);
+                    const bodyText = $('body').text();
 
-                    if (!$('body').text().includes('Não foram encontrados registros')) {
+                    if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
                          const extract = (label) => {
-                            const b = $(`b:contains("${label}")`);
-                            return (b.length > 0 && b[0].nextSibling) ? $(b[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim() : null;
+                            // Procura elemento B que contenha o label
+                            const b = $(`b:contains("${label}")`).first();
+                            if (b.length && b[0].nextSibling && b[0].nextSibling.nodeType === 3) {
+                                return $(b[0].nextSibling).text().replace(/&nbsp;/g, ' ').trim();
+                            }
+                            // Tenta buscar no parent se não achar direto
+                            if (b.length) return b.parent().text().replace(label, '').trim();
+                            return null;
                         };
 
                         const dados = {
                             inscricao_estadual: ie,
-                            cnpj: extract('CNPJ:'),
-                            razao_social: extract('Razão Social:'),
-                            municipio: extract('Município:'),
-                            telefone: extract('Telefone:'),
-                            situacao: extract('Situação Cadastral Vigente:'),
-                            motivo: extract('Motivo desta Situação Cadastral:'),
-                            contador: extract('Nome:')
+                            cnpj: extract('CNPJ:') || '',
+                            razao_social: extract('Razão Social:') || '',
+                            municipio: extract('Município:') || '',
+                            telefone: extract('Telefone:') || '',
+                            situacao: extract('Situação Cadastral Vigente:') || 'Desconhecida',
+                            motivo: extract('Motivo desta Situação Cadastral:') || '',
+                            contador: extract('Nome:') || '' // Nome do contador
                         };
 
                         if (isReprocess) {
@@ -304,18 +337,26 @@ async function runScraping(processId, filepath, isReprocess = false) {
                             await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, cnpj, razao_social, municipio, telefone, situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`, 
                             [processId, ie, dados.cnpj, dados.razao_social, dados.municipio, dados.telefone, dados.situacao, dados.motivo, dados.contador]);
                         }
-                    } else if (!isReprocess) {
-                         await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Não encontrado')`, [processId, ie]);
+                    } else {
+                         const erroMsg = bodyText.includes('Não foram encontrados registros') ? 'Não encontrado' : 'Erro na página';
+                         if (!isReprocess) {
+                             await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${erroMsg}`]);
+                         }
                     }
                 }
             } catch (err) {
+                console.error(`[Scraper] Erro ao processar IE ${ie}:`, err.message);
                 if (!isReprocess) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
             }
             await runQuery("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
+            // Pequeno delay para não sobrecarregar
+            await new Promise(r => setTimeout(r, 500));
         }
-    } catch (e) { console.error(e); } 
-    finally {
+    } catch (e) { 
+        console.error("[Scraper] Erro fatal no browser:", e); 
+    } finally {
         if (browser) await browser.close();
+        console.log(`[Scraper] Finalizado processo ${processId}`);
         await runQuery("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
     }
 }
@@ -328,7 +369,10 @@ app.post('/start-processing', upload.single('file'), async (req, res) => {
     try {
         await runQuery("INSERT INTO consulta (id, filename, status, start_time) VALUES (?, ?, 'processing', ?)", 
             [processId, req.file.originalname, new Date().toISOString()]);
+        
+        // Roda em background
         runScraping(processId, req.file.path, false);
+        
         res.json({ processId });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -348,7 +392,10 @@ app.get('/progress/:processId', async (req, res) => {
                 return;
             }
             res.write(`data: ${JSON.stringify(row)}\n\n`);
-            if (row.status === 'completed' || row.status === 'error') clearInterval(interval);
+            if (row.status === 'completed' || row.status === 'error') {
+                res.end();
+                clearInterval(interval);
+            }
         } catch (e) { clearInterval(interval); }
     }, 1000);
 
@@ -362,6 +409,7 @@ app.get('/get-all-results', async (req, res) => {
         id: r.id.toString(),
         inscricaoEstadual: r.inscricao_estadual,
         cnpj: r.cnpj,
+        razao_social: r.razao_social, // Compatible with old frontend expectation if any
         razaoSocial: r.razao_social,
         municipio: r.municipio,
         telefone: r.telefone,

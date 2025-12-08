@@ -6,7 +6,7 @@ import {
   BarChart3, Trello, MoreHorizontal, PlayCircle, PauseCircle
 } from 'lucide-react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
@@ -765,7 +765,7 @@ const App: React.FC = () => {
                                 <button 
                                    onClick={() => setEditingRule({
                                       ...editingRule,
-                                      instructions: [...editingRule.instructions, { id: Date.now().toString(), title: '', type: 'simple', content: '' }]
+                                      instructions: [...(editingRule.instructions || []), { id: Date.now().toString(), title: '', type: 'simple', content: '' }]
                                    })}
                                    className="text-sm btn-secondary py-1.5 px-3 flex items-center gap-2"
                                 >
@@ -774,7 +774,7 @@ const App: React.FC = () => {
                              </div>
                              
                              <div className="space-y-4">
-                                {editingRule.instructions.map((inst, idx) => (
+                                {(editingRule.instructions || []).map((inst, idx) => (
                                    <div key={inst.id} className="bg-slate-50 p-5 rounded-xl border border-slate-200 group relative hover:border-brand-200 hover:shadow-sm transition-all">
                                       <div className="flex gap-4 mb-3">
                                          <div className="flex-1">
@@ -783,7 +783,7 @@ const App: React.FC = () => {
                                                 className="w-full bg-transparent font-bold text-slate-800 outline-none border-b border-transparent focus:border-brand-300 pb-1"
                                                 value={inst.title}
                                                 onChange={e => {
-                                                   const newInsts = [...editingRule.instructions];
+                                                   const newInsts = [...(editingRule.instructions || [])];
                                                    newInsts[idx].title = e.target.value;
                                                    setEditingRule({...editingRule, instructions: newInsts});
                                                 }}
@@ -798,7 +798,7 @@ const App: React.FC = () => {
                                             rows={3}
                                             value={inst.content}
                                             onChange={e => {
-                                               const newInsts = [...editingRule.instructions];
+                                               const newInsts = [...(editingRule.instructions || [])];
                                                newInsts[idx].content = e.target.value;
                                                setEditingRule({...editingRule, instructions: newInsts});
                                             }}
@@ -807,7 +807,7 @@ const App: React.FC = () => {
                                       </div>
                                       <button 
                                          onClick={() => {
-                                            const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                            const newInsts = (editingRule.instructions || []).filter((_, i) => i !== idx);
                                             setEditingRule({...editingRule, instructions: newInsts});
                                          }}
                                          className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 p-1"
@@ -837,7 +837,7 @@ const App: React.FC = () => {
                        <span className="font-semibold">Adicionar Nova Regra</span>
                     </button>
 
-                    {aiConfig.knowledgeRules.map(rule => (
+                    {(aiConfig.knowledgeRules || []).map(rule => (
                        <div 
                           key={rule.id}
                           className="card-premium p-6 cursor-pointer hover:border-brand-300 group relative"
@@ -864,7 +864,7 @@ const App: React.FC = () => {
                              {rule.motivoSituacao || 'Sem Título'}
                           </h4>
                           <div className="flex items-center justify-between text-xs text-slate-500 mt-4 pt-4 border-t border-slate-50">
-                             <span>{rule.instructions.length} blocos de instrução</span>
+                             <span>{(rule.instructions || []).length} blocos de instrução</span>
                              <span className="font-medium text-brand-600 group-hover:translate-x-1 transition-transform">Editar &rarr;</span>
                           </div>
                        </div>
