@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
-  BarChart3, Trello, MoreHorizontal, PlayCircle, PauseCircle
+  BarChart3, Trello, MoreHorizontal, PlayCircle, PauseCircle, CheckSquare, Square
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -79,6 +79,12 @@ const App: React.FC = () => {
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [availableReasons, setAvailableReasons] = useState<string[]>([]);
 
+  // Selection & Bulk Actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
+
   // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
     model: 'gemini-2.5-flash',
@@ -102,6 +108,11 @@ const App: React.FC = () => {
     fetchImports();
     fetchFilters();
   }, []);
+
+  useEffect(() => {
+    // Clear selection when tab changes
+    setSelectedIds(new Set());
+  }, [activeTab]);
 
   useInterval(() => {
     fetchWhatsAppStatus();
@@ -245,6 +256,28 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
+  const handleBulkSend = async () => {
+    if (selectedIds.size === 0 || !bulkMessage.trim()) return;
+    setIsSendingBulk(true);
+    try {
+      const res = await fetch('/api/campaigns/send-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), message: bulkMessage })
+      });
+      if (res.ok) {
+        alert('Disparo iniciado! As mensagens serão enviadas em fila.');
+        setIsMessageModalOpen(false);
+        setBulkMessage('');
+        setSelectedIds(new Set());
+        fetchCompanies();
+      } else {
+        alert('Erro ao iniciar disparo. Verifique se o WhatsApp está conectado.');
+      }
+    } catch (e) { console.error(e); alert('Erro de conexão'); }
+    finally { setIsSendingBulk(false); }
+  };
+
   // --- Filtering Logic ---
 
   const filteredCompanies = useMemo(() => {
@@ -265,6 +298,23 @@ const App: React.FC = () => {
     });
   }, [companies, filters]);
 
+  // --- Selection Logic ---
+
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredCompanies.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredCompanies.map(c => c.id)));
+    }
+  };
+
   // --- Helpers ---
 
   const renderStatusBadge = (status: string) => {
@@ -277,6 +327,48 @@ const App: React.FC = () => {
       </span>
     );
   };
+
+  const FilterBar = () => (
+    <div className="card-premium p-4 flex flex-col gap-4 mb-6">
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input 
+            type="text" 
+            placeholder="Buscar por Nome, IE ou CNPJ..." 
+            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+            value={filters.search}
+            onChange={e => setFilters({...filters, search: e.target.value})}
+          />
+        </div>
+        <button onClick={fetchCompanies} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><RefreshCw size={20} /></button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <select className="input-premium py-2 text-sm" value={filters.city} onChange={e => setFilters({...filters, city: e.target.value})}>
+          <option value="">Todas as Cidades</option>
+          {availableCities.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+
+        <select className="input-premium py-2 text-sm" value={filters.reason} onChange={e => setFilters({...filters, reason: e.target.value})}>
+          <option value="">Todos os Motivos</option>
+          {availableReasons.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+
+        <select className="input-premium py-2 text-sm" value={filters.hasAccountant} onChange={e => setFilters({...filters, hasAccountant: e.target.value})}>
+          <option value="all">Contador: Todos</option>
+          <option value="yes">Com Contador</option>
+          <option value="no">Sem Contador</option>
+        </select>
+
+        <select className="input-premium py-2 text-sm" value={filters.hasPhone} onChange={e => setFilters({...filters, hasPhone: e.target.value})}>
+          <option value="all">Telefone: Todos</option>
+          <option value="yes">Com Telefone</option>
+          <option value="no">Sem Telefone</option>
+        </select>
+      </div>
+    </div>
+  );
 
   // --- Render ---
 
@@ -474,44 +566,28 @@ const App: React.FC = () => {
           {/* BASE DE EMPRESAS */}
           {activeTab === 'companies' && (
             <div className="space-y-6">
-              <div className="card-premium p-4 flex flex-col gap-4">
-                <div className="flex flex-col md:flex-row gap-4">
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input 
-                      type="text" 
-                      placeholder="Buscar por Nome, IE ou CNPJ..." 
-                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
-                      value={filters.search}
-                      onChange={e => setFilters({...filters, search: e.target.value})}
-                    />
+              <FilterBar />
+
+              <div className="card-premium overflow-hidden relative">
+                {selectedIds.size > 0 && (
+                  <div className="absolute top-0 left-0 w-full bg-brand-50 border-b border-brand-100 px-6 py-2 flex items-center justify-between z-10 animate-fade-in">
+                     <span className="text-sm font-bold text-brand-700">{selectedIds.size} empresas selecionadas</span>
+                     <button 
+                       onClick={() => setIsMessageModalOpen(true)}
+                       className="btn-primary py-1.5 px-4 text-xs flex items-center gap-2"
+                     >
+                       <Send size={14} /> Iniciar Campanha
+                     </button>
                   </div>
-                  <button onClick={fetchCompanies} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><RefreshCw size={20} /></button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <select className="input-premium py-2 text-sm" value={filters.city} onChange={e => setFilters({...filters, city: e.target.value})}>
-                    <option value="">Todas as Cidades</option>
-                    {availableCities.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-
-                  <select className="input-premium py-2 text-sm" value={filters.reason} onChange={e => setFilters({...filters, reason: e.target.value})}>
-                    <option value="">Todos os Motivos</option>
-                    {availableReasons.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-
-                  <select className="input-premium py-2 text-sm" value={filters.hasAccountant} onChange={e => setFilters({...filters, hasAccountant: e.target.value})}>
-                    <option value="all">Contador: Todos</option>
-                    <option value="yes">Com Contador</option>
-                    <option value="no">Sem Contador</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="card-premium overflow-hidden">
-                <table className="w-full text-sm text-left">
+                )}
+                <table className="w-full text-sm text-left mt-2">
                   <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
                     <tr>
+                      <th className="px-4 py-4 w-10 text-center">
+                        <button onClick={toggleSelectAll} className="hover:text-brand-600">
+                           {selectedIds.size === filteredCompanies.length ? <CheckSquare size={18} /> : <Square size={18} />}
+                        </button>
+                      </th>
                       <th className="px-6 py-4">Empresa</th>
                       <th className="px-6 py-4">Localização</th>
                       <th className="px-6 py-4">Contato</th>
@@ -521,7 +597,12 @@ const App: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredCompanies.slice(0, 100).map((company) => (
-                      <tr key={company.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={company.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(company.id) ? 'bg-brand-50/30' : ''}`}>
+                        <td className="px-4 py-4 text-center">
+                           <button onClick={() => toggleSelection(company.id)} className={`${selectedIds.has(company.id) ? 'text-brand-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                              {selectedIds.has(company.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                           </button>
+                        </td>
                         <td className="px-6 py-4">
                           <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
                           <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
@@ -565,41 +646,50 @@ const App: React.FC = () => {
 
           {/* CAMPANHAS (KANBAN) */}
           {activeTab === 'campaigns' && (
-            <div className="flex gap-4 overflow-x-auto h-[calc(100vh-140px)] pb-4">
-               {[
-                 { id: 'pending', title: 'Pendente', color: 'bg-slate-100 border-slate-200' },
-                 { id: 'sent', title: 'Enviado', color: 'bg-blue-50 border-blue-200' },
-                 { id: 'replied', title: 'Respondido', color: 'bg-amber-50 border-amber-200' },
-                 { id: 'interested', title: 'Interessado', color: 'bg-emerald-50 border-emerald-200' },
-                 { id: 'not_interested', title: 'Descartado', color: 'bg-rose-50 border-rose-200' }
-               ].map(col => {
-                 const items = companies.filter(c => c.campaignStatus === col.id || (col.id === 'pending' && !c.campaignStatus));
-                 return (
-                   <div key={col.id} className={`min-w-[300px] w-[300px] rounded-xl border flex flex-col ${col.color}`}>
-                     <div className="p-4 font-bold text-slate-700 flex justify-between">
-                       {col.title}
-                       <span className="bg-white px-2 py-0.5 rounded text-sm shadow-sm">{items.length}</span>
-                     </div>
-                     <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-                       {items.slice(0, 50).map(c => (
-                         <div key={c.id} className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-grab">
-                           <p className="font-semibold text-sm text-slate-800 mb-1">{c.razaoSocial}</p>
-                           <p className="text-xs text-slate-500 mb-2">{c.municipio}</p>
-                           <div className="flex justify-between items-center mt-2">
-                             {c.telefone ? (
-                               <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded flex items-center gap-1">
-                                 <MessageCircle size={10} /> WhatsApp
-                               </span>
-                             ) : (
-                               <span className="text-xs text-slate-400">Sem telefone</span>
-                             )}
-                           </div>
-                         </div>
-                       ))}
-                     </div>
-                   </div>
-                 )
-               })}
+            <div className="h-[calc(100vh-140px)] flex flex-col">
+               <FilterBar />
+               
+               <div className="flex gap-4 overflow-x-auto pb-4 flex-1">
+                  {[
+                    { id: 'pending', title: 'Pendente', color: 'bg-slate-100 border-slate-200' },
+                    { id: 'sent', title: 'Enviado', color: 'bg-blue-50 border-blue-200' },
+                    { id: 'replied', title: 'Respondido', color: 'bg-amber-50 border-amber-200' },
+                    { id: 'interested', title: 'Interessado', color: 'bg-emerald-50 border-emerald-200' },
+                    { id: 'not_interested', title: 'Descartado', color: 'bg-rose-50 border-rose-200' }
+                  ].map(col => {
+                    const items = filteredCompanies.filter(c => c.campaignStatus === col.id || (col.id === 'pending' && !c.campaignStatus));
+                    return (
+                      <div key={col.id} className={`min-w-[300px] w-[300px] rounded-xl border flex flex-col ${col.color}`}>
+                        <div className="p-4 font-bold text-slate-700 flex justify-between">
+                          {col.title}
+                          <span className="bg-white px-2 py-0.5 rounded text-sm shadow-sm">{items.length}</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                          {items.slice(0, 50).map(c => (
+                            <div key={c.id} className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-grab">
+                              <p className="font-semibold text-sm text-slate-800 mb-1">{c.razaoSocial}</p>
+                              <p className="text-xs text-slate-500 mb-2">{c.municipio}</p>
+                              {c.motivoSituacao && (
+                                <p className="text-[10px] text-rose-500 bg-rose-50 px-1 py-0.5 rounded inline-block mb-2 max-w-full truncate">
+                                   {c.motivoSituacao}
+                                </p>
+                              )}
+                              <div className="flex justify-between items-center mt-2 border-t border-slate-50 pt-2">
+                                {c.telefone ? (
+                                  <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded flex items-center gap-1">
+                                    <MessageCircle size={10} /> WhatsApp
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Sem telefone</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+               </div>
             </div>
           )}
 
@@ -920,6 +1010,53 @@ const App: React.FC = () => {
 
         </div>
       </main>
+
+      {/* Modal de Envio em Massa */}
+      {isMessageModalOpen && (
+         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-slide-up">
+               <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                     <Send className="text-brand-600" size={24}/> Iniciar Campanha
+                  </h3>
+                  <button onClick={() => setIsMessageModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={24}/></button>
+               </div>
+               
+               <p className="text-sm text-slate-600 mb-4">
+                  Você está prestes a enviar mensagens para <b>{selectedIds.size}</b> empresas.
+               </p>
+
+               <div className="mb-4">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Mensagem Inicial</label>
+                  <textarea 
+                     className="input-premium h-32 resize-none"
+                     placeholder="Olá, vi que sua empresa está com pendências na SEFAZ..."
+                     value={bulkMessage}
+                     onChange={e => setBulkMessage(e.target.value)}
+                  />
+                  <p className="text-xs text-slate-400 mt-2">Dica: Seja direto e cordial. A IA assumirá a conversa após a resposta do cliente.</p>
+               </div>
+
+               <div className="flex justify-end gap-3">
+                  <button 
+                     onClick={() => setIsMessageModalOpen(false)}
+                     className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium"
+                  >
+                     Cancelar
+                  </button>
+                  <button 
+                     onClick={handleBulkSend}
+                     disabled={isSendingBulk || !bulkMessage.trim()}
+                     className="btn-primary flex items-center gap-2"
+                  >
+                     {isSendingBulk ? <RefreshCw className="animate-spin" size={18}/> : <Send size={18}/>}
+                     {isSendingBulk ? 'Enviando...' : 'Confirmar Envio'}
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+
     </div>
   );
 };

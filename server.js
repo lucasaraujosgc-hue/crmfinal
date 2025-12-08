@@ -168,6 +168,11 @@ client.on('message', async msg => {
                         situacao: row.situacao_cadastral,
                         motivoSituacao: row.motivo_situacao_cadastral
                     };
+                    
+                    // Atualiza status se o cliente respondeu e estava pendente ou enviado
+                    if (row.campaign_status === 'sent' || row.campaign_status === 'pending') {
+                         await runQuery("UPDATE resultado SET campaign_status = 'replied' WHERE id = ?", [row.id]);
+                    }
                 }
             }
         } catch (err) { 
@@ -457,6 +462,8 @@ app.get('/api/unique-filters', async (req, res) => {
     });
 });
 
+// --- WhatsApp API Endpoints ---
+
 app.get('/api/whatsapp/chats', async (req, res) => {
     if (whatsappStatus !== 'connected') return res.json([]);
     try {
@@ -493,6 +500,46 @@ app.post('/api/whatsapp/send', async (req, res) => {
         await client.sendMessage(req.body.chatId, req.body.message);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Endpoint de Envio em Massa (Campaign)
+app.post('/api/campaigns/send-bulk', async (req, res) => {
+    const { ids, message } = req.body;
+    if (!ids || !ids.length || !message) return res.status(400).json({ error: 'Dados incompletos' });
+    if (whatsappStatus !== 'connected') return res.status(400).json({ error: 'WhatsApp desconectado' });
+
+    let sentCount = 0;
+    
+    // Roda em background para não travar a requisição
+    (async () => {
+        for (const id of ids) {
+            try {
+                const row = await getOne("SELECT * FROM resultado WHERE id = ?", [id]);
+                if (row && row.telefone) {
+                    // Formata o número (assume 55 se não tiver DDI, remove chars não numéricos)
+                    let phone = row.telefone.replace(/\D/g, '');
+                    if (phone.length <= 11) phone = '55' + phone; 
+                    
+                    const chatId = phone + '@c.us';
+                    
+                    // Delay aleatório anti-ban (5 a 15 segundos)
+                    await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000));
+                    
+                    await client.sendMessage(chatId, message);
+                    
+                    await runQuery(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ? WHERE id = ?`, 
+                        [new Date().toISOString(), id]);
+                    
+                    sentCount++;
+                    console.log(`[Campaign] Enviado para ${row.razao_social} (${phone})`);
+                }
+            } catch (err) {
+                console.error(`[Campaign] Erro ao enviar para ID ${id}:`, err.message);
+            }
+        }
+    })();
+
+    res.json({ success: true, message: 'Disparo iniciado em segundo plano' });
 });
 
 app.post('/api/whatsapp/toggle-ai', async (req, res) => {
