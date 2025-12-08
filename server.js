@@ -155,9 +155,9 @@ client.on('message', async msg => {
 
     try {
         let contextData = null;
-        // Correção Robustez: Tenta pegar o contato, se falhar, continua sem contexto
         try {
-            const contact = await msg.getContact();
+            // Safe contact lookup
+            const contact = await msg.getContact().catch(() => null);
             if (contact && contact.number) {
                 const cleanPhone = contact.number.replace(/\D/g, '').slice(-8);
                 const row = await getOne("SELECT * FROM resultado WHERE telefone LIKE ?", [`%${cleanPhone}`]);
@@ -171,7 +171,7 @@ client.on('message', async msg => {
                 }
             }
         } catch (err) { 
-            console.warn('[AI] Aviso: Não foi possível obter detalhes do contato (continuando).', err.message); 
+            console.warn('[AI] Context lookup skipped:', err.message); 
         }
 
         let systemInstruction = `Você é um assistente comercial da CRM VIRGULA.`;
@@ -225,7 +225,7 @@ async function initializeWhatsApp() {
 }
 initializeWhatsApp();
 
-// --- Lógica de Scraping (Réplica do Python) ---
+// --- Lógica de Scraping Otimizada ---
 
 async function runScraping(processId, filepath, isReprocess = false) {
     let ies = [];
@@ -239,26 +239,31 @@ async function runScraping(processId, filepath, isReprocess = false) {
             console.log(`[Scraper] Lendo PDF: ${filepath}`);
             const dataBuffer = fs.readFileSync(filepath);
             const data = await pdf(dataBuffer);
-            console.log(`[Scraper] Texto extraído (${data.text.length} chars)`);
             
-            // Regex fiel ao Python: (\d{1,3}\.\d{1,3}\.\d{1,3})\s*-
-            // Captura padrão "123.456.789 - X" e pega apenas os números
-            const regex = /(\d{1,3}\.\d{1,3}\.\d{1,3})\s*-/g;
-            const matches = [...data.text.matchAll(regex)];
-            
-            if (matches && matches.length > 0) {
-                // match[1] é o grupo de captura (números com pontos)
-                const rawIes = matches.map(m => m[1].replace(/\D/g, ''));
-                // Filtra para garantir que tem pelo menos 8 dígitos (IE Bahia costuma ter 9)
-                ies = [...new Set(rawIes)].filter(ie => ie.length >= 8);
-            } else {
-                // Fallback para números soltos de 9 dígitos se a regex rígida falhar
-                const fallbackRegex = /\b\d{8,9}\b/g;
-                const fallbackMatches = data.text.match(fallbackRegex);
-                 if (fallbackMatches) {
-                     ies = [...new Set(fallbackMatches)];
-                 }
-            }
+            // LOG DE DEBUG PARA VER O QUE O PDF-PARSE ESTÁ LENDO
+            const previewText = data.text.substring(0, 200).replace(/\n/g, ' ');
+            console.log(`[Scraper] Preview Texto: ${previewText}`);
+
+            let rawIes = [];
+
+            // Estratégia 1: Regex Padrão (123.456.789 -)
+            const regexStandard = /(\d{1,3}\.\d{1,3}\.\d{1,3})\s*-/g;
+            const matchesStd = [...data.text.matchAll(regexStandard)];
+            matchesStd.forEach(m => rawIes.push(m[1].replace(/\D/g, '')));
+
+            // Estratégia 2: Regex para texto espaçado (2 0 1 . 5 5 5) - Comum em pdf-parse
+            // Padrão: Digito + espaço opcional + ponto + espaço opcional...
+            // Ex: 2 0 1 . 5 7 6
+            const regexSpaced = /((?:\d\s*){1,3}\.(?:\d\s*){1,3}\.(?:\d\s*){1,3})\s*-/g;
+            const matchesSpaced = [...data.text.matchAll(regexSpaced)];
+            matchesSpaced.forEach(m => {
+                // Remove espaços e pontos para limpar
+                rawIes.push(m[1].replace(/[\s\.]/g, ''));
+            });
+
+            // Filtra e limpa
+            ies = [...new Set(rawIes)].filter(ie => ie.length >= 8);
+
             console.log(`[Scraper] Encontradas ${ies.length} IEs únicas no PDF`);
         } catch (e) {
             console.error("[Scraper] Erro ao ler PDF:", e);
@@ -268,7 +273,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
     }
 
     if (ies.length === 0) {
-        console.warn("[Scraper] Nenhuma IE encontrada.");
+        console.warn("[Scraper] Nenhuma IE encontrada. Verifique o formato do PDF.");
         await runQuery("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
         return;
     }
@@ -297,8 +302,14 @@ async function runScraping(processId, filepath, isReprocess = false) {
                     timeout: 60000 
                 });
                 
-                await page.waitForSelector('input[name="IE"]', { timeout: 20000 });
+                await page.waitForSelector('input[name="IE"]', { timeout: 30000 }).catch(() => null);
                 
+                // Verifica se carregou o input
+                const inputExists = await page.$('input[name="IE"]');
+                if (!inputExists) {
+                    throw new Error("Campo IE não encontrado (Timeout ou Bloqueio)");
+                }
+
                 await page.$eval('input[name="IE"]', el => el.value = '');
                 await page.type('input[name="IE"]', ie);
 
@@ -306,7 +317,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
                     page.click("input[type='submit'][name='B2']")
-                ]).catch(() => console.log('Navegação falhou ou timeout, tentando ler página atual...'));
+                ]).catch(() => console.log('Navegação demorou, tentando ler página atual...'));
 
                 const html = await page.content();
                 const $ = cheerio.load(html);
@@ -315,7 +326,6 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
                      // Helper de extração (Replica a lógica do unescape + strip)
                      const extract = (label) => {
-                        // Busca tag B contendo o texto, ignorando case e entidades html
                         const el = $('b').filter((i, el) => {
                             const t = $(el).text().replace(/\s+/g, ' ').trim();
                             return t.includes(label);
@@ -329,7 +339,6 @@ async function runScraping(processId, filepath, isReprocess = false) {
                     };
 
                     // Lógica ESPECÍFICA do Python para Atividade Econômica
-                    // Python: tag_ativ.find_parent('tr').find_next_sibling('tr').get_text()
                     let atividade = '';
                     const ativLabel = $('b').filter((i, el) => $(el).text().includes('Atividade Econômica') || $(el).text().includes('Atividade Econômica Principal'));
                     
@@ -349,7 +358,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
                         telefone: extract('Telefone:') || '',
                         situacao: extract('Situação Cadastral Vigente:') || extract('Situa&ccedil;&atilde;o Cadastral Vigente:') || 'Desconhecida',
                         motivo: extract('Motivo desta Situação Cadastral:') || extract('Motivo desta Situa&ccedil;&atilde;o Cadastral:') || '',
-                        contador: extract('Nome:') || '', // Nome do contador geralmente vem após 'Nome:'
+                        contador: extract('Nome:') || '',
                         atividade_economica_principal: atividade
                     };
 
@@ -371,7 +380,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 if (!isReprocess) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
             }
             await runQuery("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
-            await new Promise(r => setTimeout(r, 1000)); // Delay para evitar bloqueio
+            await new Promise(r => setTimeout(r, 1500)); // Delay aumentado
         }
     } catch (e) { 
         console.error("[Scraper] Erro fatal no browser:", e); 
@@ -423,14 +432,13 @@ app.get('/progress/:processId', async (req, res) => {
     req.on('close', () => clearInterval(interval));
 });
 
-// Outros endpoints (get-all-results, etc) mantidos iguais
 app.get('/get-all-results', async (req, res) => {
     const rows = await getQuery("SELECT * FROM resultado ORDER BY id DESC");
     res.json(rows.map(r => ({
         id: r.id.toString(),
         inscricaoEstadual: r.inscricao_estadual,
         cnpj: r.cnpj,
-        razao_social: r.razao_social, // Compatible with old frontend expectation if any
+        razao_social: r.razao_social,
         razaoSocial: r.razao_social,
         municipio: r.municipio,
         telefone: r.telefone,
