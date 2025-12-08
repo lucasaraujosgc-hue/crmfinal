@@ -332,9 +332,14 @@ const App: React.FC = () => {
         c.cnpj?.includes(filters.search);
         
       const cityMatch = !filters.city || c.municipio === filters.city;
-      const reasonMatch = !filters.reason || (c.motivoSituacao && c.motivoSituacao.includes(filters.reason));
+      
+      // FIX: Case insensitive reason matching
+      const reasonMatch = !filters.reason || 
+        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+        
       const accountantMatch = filters.hasAccountant === 'all' ? true :
         filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+        
       const phoneMatch = filters.hasPhone === 'all' ? true :
         filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
 
