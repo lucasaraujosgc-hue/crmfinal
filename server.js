@@ -156,7 +156,7 @@ client.on('message', async msg => {
     try {
         let contextData = null;
         try {
-            // Safe contact lookup
+            // Safe contact lookup com try/catch silencioso para evitar crash
             const contact = await msg.getContact().catch(() => null);
             if (contact && contact.number) {
                 const cleanPhone = contact.number.replace(/\D/g, '').slice(-8);
@@ -181,9 +181,12 @@ client.on('message', async msg => {
             Situação na SEFAZ: ${contextData.situacao}
             Motivo da Inaptidão: ${contextData.motivoSituacao}`;
             
-            const matchingRule = activeRules.find(r => contextData.motivoSituacao && r.motivoSituacao && contextData.motivoSituacao.includes(r.motivoSituacao));
-            if (matchingRule) {
-                matchingRule.instructions.forEach(inst => systemInstruction += `\n[${inst.title}]: ${inst.content}`);
+            // Busca regra correspondente
+            if (activeRules && activeRules.length > 0 && contextData.motivoSituacao) {
+                const matchingRule = activeRules.find(r => r.motivoSituacao && contextData.motivoSituacao.includes(r.motivoSituacao));
+                if (matchingRule && matchingRule.instructions) {
+                    matchingRule.instructions.forEach(inst => systemInstruction += `\n[${inst.title}]: ${inst.content}`);
+                }
             }
         }
 
@@ -240,31 +243,21 @@ async function runScraping(processId, filepath, isReprocess = false) {
             const dataBuffer = fs.readFileSync(filepath);
             const data = await pdf(dataBuffer);
             
-            // LOG DE DEBUG PARA VER O QUE O PDF-PARSE ESTÁ LENDO
-            const previewText = data.text.substring(0, 200).replace(/\n/g, ' ');
-            console.log(`[Scraper] Preview Texto: ${previewText}`);
+            // Texto Bruto Normalizado (sem espaços) para evitar problemas de kerning
+            // Ex: "2 0 1 . 5 7 6" vira "201.576"
+            const rawText = data.text;
+            const normalizedText = rawText.replace(/\s+/g, ''); 
+            
+            // Regex que busca o padrão XX.XXX.XXX- no texto normalizado
+            const regexNormalized = /(\d{1,3}\.\d{1,3}\.\d{1,3})-/g;
+            const matches = [...normalizedText.matchAll(regexNormalized)];
+            
+            const foundIes = matches.map(m => m[1].replace(/\D/g, ''));
+            
+            // Filtra duplicatas e IEs inválidas
+            ies = [...new Set(foundIes)].filter(ie => ie.length >= 8);
 
-            let rawIes = [];
-
-            // Estratégia 1: Regex Padrão (123.456.789 -)
-            const regexStandard = /(\d{1,3}\.\d{1,3}\.\d{1,3})\s*-/g;
-            const matchesStd = [...data.text.matchAll(regexStandard)];
-            matchesStd.forEach(m => rawIes.push(m[1].replace(/\D/g, '')));
-
-            // Estratégia 2: Regex para texto espaçado (2 0 1 . 5 5 5) - Comum em pdf-parse
-            // Padrão: Digito + espaço opcional + ponto + espaço opcional...
-            // Ex: 2 0 1 . 5 7 6
-            const regexSpaced = /((?:\d\s*){1,3}\.(?:\d\s*){1,3}\.(?:\d\s*){1,3})\s*-/g;
-            const matchesSpaced = [...data.text.matchAll(regexSpaced)];
-            matchesSpaced.forEach(m => {
-                // Remove espaços e pontos para limpar
-                rawIes.push(m[1].replace(/[\s\.]/g, ''));
-            });
-
-            // Filtra e limpa
-            ies = [...new Set(rawIes)].filter(ie => ie.length >= 8);
-
-            console.log(`[Scraper] Encontradas ${ies.length} IEs únicas no PDF`);
+            console.log(`[Scraper] Encontradas ${ies.length} IEs únicas no PDF (Normalizado)`);
         } catch (e) {
             console.error("[Scraper] Erro ao ler PDF:", e);
             await runQuery("UPDATE consulta SET status = 'error' WHERE id = ?", [processId]);
@@ -274,7 +267,8 @@ async function runScraping(processId, filepath, isReprocess = false) {
 
     if (ies.length === 0) {
         console.warn("[Scraper] Nenhuma IE encontrada. Verifique o formato do PDF.");
-        await runQuery("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
+        await runQuery("UPDATE consulta SET status = 'error', processed = 0 WHERE id = ?", [processId]);
+        // Em vez de 'completed', marcamos erro se não achou nada para alertar o usuário
         return;
     }
 
@@ -286,7 +280,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-            args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-setuid-sandbox'],
+            args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-setuid-sandbox', '--start-maximized'],
             ignoreHTTPSErrors: true
         });
 
@@ -296,35 +290,31 @@ async function runScraping(processId, filepath, isReprocess = false) {
         for (let i = 0; i < ies.length; i++) {
             const ie = ies[i];
             try {
-                // Timeout aumentado para tolerar lentidão
+                // Navegação com tolerância
                 await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { 
                     waitUntil: 'networkidle2', 
                     timeout: 60000 
                 });
                 
-                await page.waitForSelector('input[name="IE"]', { timeout: 30000 }).catch(() => null);
+                const inputSelector = 'input[name="IE"]';
+                await page.waitForSelector(inputSelector, { timeout: 30000 });
                 
-                // Verifica se carregou o input
-                const inputExists = await page.$('input[name="IE"]');
-                if (!inputExists) {
-                    throw new Error("Campo IE não encontrado (Timeout ou Bloqueio)");
-                }
+                // Limpa e digita
+                await page.$eval(inputSelector, el => el.value = '');
+                await page.type(inputSelector, ie);
 
-                await page.$eval('input[name="IE"]', el => el.value = '');
-                await page.type('input[name="IE"]', ie);
-
-                // Clica e espera a navegação
+                // Clica no botão de consulta e espera
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
                     page.click("input[type='submit'][name='B2']")
-                ]).catch(() => console.log('Navegação demorou, tentando ler página atual...'));
+                ]);
 
                 const html = await page.content();
                 const $ = cheerio.load(html);
                 const bodyText = $('body').text();
 
                 if (bodyText.includes('Consulta Básica ao Cadastro do ICMS da Bahia')) {
-                     // Helper de extração (Replica a lógica do unescape + strip)
+                     // Helper de extração
                      const extract = (label) => {
                         const el = $('b').filter((i, el) => {
                             const t = $(el).text().replace(/\s+/g, ' ').trim();
@@ -338,9 +328,12 @@ async function runScraping(processId, filepath, isReprocess = false) {
                         return null;
                     };
 
-                    // Lógica ESPECÍFICA do Python para Atividade Econômica
+                    // Extração de Atividade Econômica (Mesma lógica do Python: Linha de baixo)
                     let atividade = '';
-                    const ativLabel = $('b').filter((i, el) => $(el).text().includes('Atividade Econômica') || $(el).text().includes('Atividade Econômica Principal'));
+                    const ativLabel = $('b').filter((i, el) => {
+                        const t = $(el).text();
+                        return t.includes('Atividade Econômica') || t.includes('Atividade Econômica Principal');
+                    });
                     
                     if (ativLabel.length) {
                         const parentTr = ativLabel.closest('tr');
@@ -380,7 +373,7 @@ async function runScraping(processId, filepath, isReprocess = false) {
                 if (!isReprocess) await runQuery(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, ?)`, [processId, ie, `Erro: ${err.message}`]);
             }
             await runQuery("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
-            await new Promise(r => setTimeout(r, 1500)); // Delay aumentado
+            await new Promise(r => setTimeout(r, 1000));
         }
     } catch (e) { 
         console.error("[Scraper] Erro fatal no browser:", e); 

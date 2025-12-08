@@ -133,7 +133,8 @@ const App: React.FC = () => {
                          if (data.status === 'completed' || data.status === 'error') {
                            fetchCompanies(); // Refresh data
                            fetchImports();
-                           setTimeout(() => setCurrentProcessId(null), 2000);
+                           // Small delay to show completion
+                           setTimeout(() => setCurrentProcessId(null), 3000);
                          }
                        } catch (e) {}
                      }
@@ -150,6 +151,7 @@ const App: React.FC = () => {
   }, currentProcessId ? 1000 : null);
 
   useEffect(() => {
+    // Sync AI rules to server
     fetch('/api/config/ai-rules', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -358,7 +360,7 @@ const App: React.FC = () => {
                 ].map((stat, i) => (
                   <div key={i} className="card-premium p-6 hover:-translate-y-1 transition-transform">
                     <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
-                    <h3 className={`text-3xl font-bold ${stat.color}`}>{stat.value}</h3>
+                    <h3 className="text-3xl font-bold text-slate-700">{stat.value}</h3>
                   </div>
                 ))}
               </div>
@@ -395,9 +397,10 @@ const App: React.FC = () => {
                             <p className="text-xs text-slate-500">{new Date(imp.date).toLocaleDateString()} • {imp.total} registros</p>
                         </div>
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                          imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                          imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 
+                          imp.status === 'error' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
                         }`}>
-                          {imp.status === 'completed' ? 'Concluído' : 'Processando'}
+                          {imp.status === 'completed' ? 'Concluído' : imp.status === 'error' ? 'Erro' : 'Processando'}
                         </span>
                       </div>
                     ))}
@@ -448,13 +451,16 @@ const App: React.FC = () => {
                   
                   <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden mb-2">
                     <div 
-                      className="bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out"
+                      className={`bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out ${processProgress.status === 'error' ? 'bg-rose-500' : ''}`}
                       style={{ width: `${processProgress.total > 0 ? (processProgress.processed / processProgress.total) * 100 : 0}%` }}
                     />
                   </div>
                   <p className="text-sm font-medium text-slate-600">
                     {processProgress.processed} de {processProgress.total} empresas consultadas
                   </p>
+                  {processProgress.status === 'error' && (
+                     <p className="text-rose-500 font-bold mt-2">Ocorreu um erro no processamento.</p>
+                  )}
                 </div>
               )}
               
