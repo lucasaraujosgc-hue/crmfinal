@@ -152,14 +152,22 @@ async function runScraping(filepath, processId) {
 
         // 2. Launch Browser
         browser = await puppeteer.launch({
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+            headless: true, // Mantenha true para servidor, false para debug visual local
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // Usa o bundled se não definido
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--window-size=1280,800' // Tamanho de janela realista
+            ],
             ignoreHTTPSErrors: true
         });
 
         const page = await browser.newPage();
         
+        // User Agent Realista para evitar bloqueios
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
         // Loop IEs
         for (let i = 0; i < ieList.length; i++) {
             const ie = ieList[i];
@@ -172,88 +180,118 @@ async function runScraping(filepath, processId) {
             try {
                 console.log(`[Scraper] Consultando IE ${i+1}/${ieList.length}: ${ie}`);
                 
-                // Navegar
+                // Navegar para a página inicial
                 await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { 
                     waitUntil: 'networkidle2',
-                    timeout: 30000 
+                    timeout: 45000 
                 });
 
-                // Preencher
-                await page.waitForSelector('input[name="IE"]', { timeout: 10000 });
-                await page.$eval('input[name="IE"]', (el) => el.value = '');
-                await page.type('input[name="IE"]', ie);
+                // Preencher o Input da IE
+                const inputSelector = 'input[name="IE"]';
+                await page.waitForSelector(inputSelector, { timeout: 15000 });
                 
-                // Clicar em Consultar (input type submit com value contendo 'IE')
-                await page.click('input[type="submit"][value*="IE"]');
+                // Limpa o campo (Garante que está vazio) e digita
+                await page.evaluate((sel) => { document.querySelector(sel).value = '' }, inputSelector);
+                await page.type(inputSelector, ie, { delay: 50 }); // Digita com delay humano
+                
+                // Clicar no botão ESPECÍFICO (name="B2")
+                // Usamos Promise.all para esperar a navegação acontecer após o clique
+                const submitSelector = 'input[name="B2"]';
+                
+                await Promise.all([
+                    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => console.log('Navigation timeout ignore')),
+                    page.click(submitSelector)
+                ]);
 
-                // Esperar resultado
-                await page.waitForSelector('td', { timeout: 10000 }); // Espera genérica por tabela
+                // Aguarda um elemento chave da página de resultado OU da página de erro
+                // Esperamos pelo menos a tag <body> carregar
+                await page.waitForSelector('body', { timeout: 15000 });
 
-                // Verificar se carregou a tabela correta
+                // Verificar o conteúdo
                 const content = await page.content();
                 const $ = cheerio.load(content);
                 
-                if ($("td:contains('Consulta Básica ao Cadastro do ICMS da Bahia')").length > 0) {
+                // Verifica se carregou a tabela de resultado
+                // Procurando por textos que confirmam o sucesso
+                const textBody = $('body').text();
+                
+                if (textBody.includes('Consulta Básica ao Cadastro do ICMS') || textBody.includes('Razão Social')) {
                     
-                    // Helper para limpar texto
+                    // Helper para limpar texto e pegar o valor do próximo nó de texto após o <b>
                     const getField = (label) => {
-                        // Busca b que contem o label
-                        // Pega o parent ou next sibling
-                        // Lógica adaptada do Python: acha o <b>, pega o nextSibling
                         let val = null;
+                        // Procura todos os <b>
                         $('b').each((_, el) => {
-                            const text = $(el).text().replace(/\u00a0/g, ' ').trim();
-                            if (text.includes(label)) {
+                            const bText = $(el).text().replace(/\s+/g, ' ').trim();
+                            // Se o texto do <b> contiver o label (ex: "Razão Social:")
+                            if (bText.includes(label)) {
+                                // Pega o nó seguinte. Em sites ASP antigos, geralmente é um TextNode solto.
                                 const nextNode = el.nextSibling;
-                                if (nextNode && nextNode.nodeType === 3) { // Text node
+                                if (nextNode && nextNode.nodeType === 3) { // 3 = Text Node
                                     val = nextNode.nodeValue.trim();
+                                } else if (nextNode && nextNode.name === 'font') { // Às vezes envelopam em <font>
+                                    val = $(nextNode).text().trim();
                                 }
                             }
                         });
-                        return val;
+                        return val ? val.replace(/\s+/g, ' ').trim() : null;
                     };
 
-                    // Extração de Atividade Econômica (Lógica complexa do Python: linha de baixo)
+                    // Extração de Atividade Econômica (geralmente está na linha de baixo)
                     let atividade = null;
                     $('b').each((_, el) => {
                         if ($(el).text().includes('Atividade Econômica')) {
                              const tr = $(el).closest('tr');
-                             const nextTr = tr.next('tr');
+                             const nextTr = tr.next('tr'); // Pega a próxima linha da tabela
                              if (nextTr.length) {
-                                 atividade = nextTr.text().trim();
+                                 // Pega o texto da célula correspondente (geralmente a segunda td)
+                                 atividade = nextTr.find('td').last().text().replace(/\s+/g, ' ').trim();
+                                 if (!atividade) atividade = nextTr.text().replace(/\s+/g, ' ').trim();
                              }
                         }
                     });
 
-                    resultData = {
-                        consulta_id: processId,
-                        inscricao_estadual: getField('Inscrição Estadual:') || ie,
-                        cnpj: getField('CNPJ:'),
-                        razao_social: getField('Razão Social:') || getField('Razão Social'),
-                        nome_fantasia: getField('Nome Fantasia:'),
-                        unidade_fiscalizacao: getField('Unidade de Fiscalização:'),
-                        logradouro: getField('Logradouro:'),
-                        bairro_distrito: getField('Bairro/Distrito:'),
-                        municipio: getField('Município:'),
-                        uf: getField('UF:'),
-                        cep: getField('CEP:'),
-                        telefone: getField('Telefone:'),
-                        email: getField('E-mail:'),
-                        atividade_economica_principal: atividade,
-                        condicao: getField('Condição:'),
-                        forma_pagamento: getField('Forma de pagamento:'),
-                        situacao_cadastral: getField('Situação Cadastral Vigente:'),
-                        data_situacao_cadastral: getField('Data desta Situação Cadastral:'),
-                        motivo_situacao_cadastral: getField('Motivo desta Situação Cadastral:'),
-                        nome_contador: getField('Nome:'), // Nome do contador geralmente aparece assim
-                        status: 'Sucesso'
-                    };
+                    // Tenta capturar Razão Social de duas formas (com ou sem :)
+                    const razao = getField('Razão Social:') || getField('Razão Social');
+
+                    if (razao) {
+                        resultData = {
+                            consulta_id: processId,
+                            inscricao_estadual: getField('Inscrição Estadual:') || ie,
+                            cnpj: getField('CNPJ:'),
+                            razao_social: razao,
+                            nome_fantasia: getField('Nome Fantasia:'),
+                            unidade_fiscalizacao: getField('Unidade de Fiscalização:'),
+                            logradouro: getField('Logradouro:'),
+                            bairro_distrito: getField('Bairro/Distrito:'),
+                            municipio: getField('Município:'),
+                            uf: getField('UF:'),
+                            cep: getField('CEP:'),
+                            telefone: getField('Telefone:'),
+                            email: getField('E-mail:'),
+                            atividade_economica_principal: atividade,
+                            condicao: getField('Condição:'),
+                            forma_pagamento: getField('Forma de pagamento:'),
+                            situacao_cadastral: getField('Situação Cadastral Vigente:'),
+                            data_situacao_cadastral: getField('Data desta Situação Cadastral:'),
+                            motivo_situacao_cadastral: getField('Motivo desta Situação Cadastral:'),
+                            nome_contador: getField('Nome:'), 
+                            status: 'Sucesso'
+                        };
+                    } else {
+                         // Se achou o título mas não achou a razão social, pode ter mudado o layout ou ser erro
+                         console.log(`[Scraper] Layout reconhecido mas dados vazios para IE ${ie}`);
+                         resultData.status = 'Erro: Dados não encontrados';
+                    }
                 } else {
-                    console.log(`[Scraper] Página de resultado não confirmada para IE ${ie}`);
+                    // Página de erro ou "Não encontrado"
+                    const errorMsg = $('font[color="#FF0000"]').text().trim() || 'IE não encontrada ou erro no site';
+                    console.log(`[Scraper] Resultado negativo para IE ${ie}: ${errorMsg}`);
+                    resultData.status = 'Erro: ' + errorMsg.substring(0, 50);
                 }
 
             } catch (err) {
-                console.error(`[Scraper] Erro ao processar IE ${ie}:`, err.message);
+                console.error(`[Scraper] Exception ao processar IE ${ie}:`, err.message);
                 resultData.status = 'Erro: ' + err.message;
             }
 
@@ -265,8 +303,9 @@ async function runScraping(filepath, processId) {
             db.run(`INSERT INTO resultado (${cols}) VALUES (${placeholders})`, vals);
             db.run('UPDATE consulta SET processed = ? WHERE id = ?', [i + 1, processId]);
             
-            // Delay anti-block
-            await new Promise(r => setTimeout(r, 1000));
+            // Delay anti-block aleatório entre 1s e 3s
+            const delay = Math.floor(Math.random() * 2000) + 1000;
+            await new Promise(r => setTimeout(r, delay));
         }
 
         db.run('UPDATE consulta SET status = "completed", end_time = ? WHERE id = ?', [new Date().toISOString(), processId]);
