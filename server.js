@@ -138,7 +138,7 @@ async function runScraping(filepath, processId) {
                 '--disable-gpu',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',
+                // '--single-process', // REMOVIDO: Causa instabilidade
                 '--window-size=1280,800'
             ],
             ignoreHTTPSErrors: true
@@ -279,6 +279,30 @@ async function runScraping(filepath, processId) {
     }
 }
 
+// --- CLEANUP LOCK FILES ON STARTUP ---
+function cleanAuthLock() {
+    try {
+        if (fs.existsSync(AUTH_DIR)) {
+             const findAndDeleteLock = (dir) => {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                    const fullPath = path.join(dir, file);
+                    if (fs.lstatSync(fullPath).isDirectory()) {
+                        findAndDeleteLock(fullPath);
+                    } else if (file === 'SingletonLock') {
+                        console.log(`[Startup] Removing lock file: ${fullPath}`);
+                        fs.unlinkSync(fullPath);
+                    }
+                }
+            };
+            findAndDeleteLock(AUTH_DIR);
+        }
+    } catch (e) {
+        console.error('[Startup] Error cleaning lock files:', e);
+    }
+}
+
+cleanAuthLock();
 
 // --- WHATSAPP CLIENT ---
 const client = new Client({
@@ -286,14 +310,14 @@ const client = new Client({
   puppeteer: {
     headless: true,
     // Argumentos críticos para rodar em Docker sem crashar
+    // REMOVIDO --single-process pois causa crashes em versões recentes
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox', 
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
-      '--no-zygote',
-      '--single-process', 
+      '--no-zygote', 
       '--disable-gpu'
     ],
   },
@@ -419,8 +443,19 @@ client.on('message', async (msg) => {
     );
 });
 
-client.initialize();
+// Inicialização com tratamento de erro
+try {
+    client.initialize().catch(err => console.error('[WhatsApp] Init Error:', err));
+} catch(err) {
+    console.error('[WhatsApp] Fatal Init Error:', err);
+}
 
+// Graceful Shutdown
+process.on('SIGINT', async () => {
+    console.log('[Server] Shutting down...');
+    await client.destroy();
+    process.exit(0);
+});
 
 // --- API ROUTES ---
 
