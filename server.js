@@ -1,4 +1,5 @@
 import './polyfill.js'; // IMPORTANTE: Deve ser a primeira importação
+import 'dotenv/config';
 import express from 'express';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -23,11 +24,22 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3000;
 
+// --- PERSISTENCE SETUP ---
+// Define a pasta de dados centralizada para facilitar o volume no Docker/Easypanel
+const DATA_DIR = path.join(__dirname, 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+const AUTH_DIR = path.join(DATA_DIR, 'whatsapp_auth');
+const DB_PATH = path.join(DATA_DIR, 'consultas.db');
+
+// Garante que as pastas existem
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
 // Configuração do Multer para Uploads
-const upload = multer({ dest: 'sefaz_uploads/' });
+const upload = multer({ dest: UPLOADS_DIR });
 
 // Banco de Dados SQLite
-const db = new sqlite3.Database('consultas.db');
+const db = new sqlite3.Database(DB_PATH);
 
 // Inicialização do Banco
 db.serialize(() => {
@@ -270,7 +282,7 @@ async function runScraping(filepath, processId) {
 
 // --- WHATSAPP CLIENT ---
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: 'whatsapp_auth' }),
+  authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
   puppeteer: {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -424,19 +436,17 @@ client.on('message', async (msg) => {
                 // Initialize GenAI
                 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || 'AIzaSy...' }); 
                 
-                const model = ai.models.getGenerativeModel({ 
+                const model = ai.models.generateContent({ 
                     model: aiConfig.model || 'gemini-2.5-flash',
-                    systemInstruction: completeSystemInstruction
-                });
-
-                const result = await model.generateContent({
-                    contents: [{ role: 'user', parts: promptParts }],
-                    generationConfig: {
+                    contents: { role: 'user', parts: promptParts },
+                    config: {
+                        systemInstruction: completeSystemInstruction,
                         temperature: aiConfig.temperature || 0.7
                     }
                 });
 
-                const responseText = result.response.text();
+                const response = await model;
+                const responseText = response.text;
                 await msg.reply(responseText);
 
             } catch (error) {
