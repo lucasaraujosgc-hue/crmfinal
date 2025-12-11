@@ -105,12 +105,14 @@ async function runScraping(filepath, processId) {
         const cleanText = rawText.replace(/\s+/g, ''); 
         
         const ies = new Set();
-        const regexStrict = /(\d{1,3}\.\d{1,3}\.\d{1,3})-/g;
+        // Captura XX.XXX.XXX-XX ou XXXXXXXX-XX
+        const regexStrict = /(\d{1,3}\.?\d{1,3}\.?\d{1,3})-?/g;
         
         let match;
         while ((match = regexStrict.exec(cleanText)) !== null) {
-            const ieDigits = match[1].replace(/\D/g, '');
-            if (ieDigits.length >= 8) {
+            const ieDigits = match[0].replace(/\D/g, '');
+            // IE Bahia tem 8 ou 9 dígitos
+            if (ieDigits.length >= 8 && ieDigits.length <= 9) {
                  ies.add(ieDigits);
             }
         }
@@ -144,12 +146,6 @@ async function runScraping(filepath, processId) {
             };
 
             try {
-                // await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { 
-                //     waitUntil: 'networkidle2',
-                //     timeout: 45000 
-                // });
-                
-                // Retry logic for navigation
                 let loaded = false;
                 for(let attempt=0; attempt<3; attempt++) {
                     try {
@@ -163,9 +159,12 @@ async function runScraping(filepath, processId) {
 
                 const inputSelector = 'input[name="IE"]';
                 await page.waitForSelector(inputSelector, { timeout: 15000 });
-                await page.evaluate((sel) => { document.querySelector(sel).value = '' }, inputSelector);
+                
+                // Limpa e digita
+                await page.$eval(inputSelector, el => el.value = '');
                 await page.type(inputSelector, ie, { delay: 100 });
                 
+                // Clica no botão específico name="B2"
                 const submitSelector = 'input[name="B2"]';
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => console.log('Nav timeout ignored')),
@@ -175,87 +174,60 @@ async function runScraping(filepath, processId) {
                 await page.waitForSelector('body', { timeout: 15000 });
                 const content = await page.content();
                 const $ = cheerio.load(content);
-                const textBody = $('body').text();
+                const textBody = $('body').text().replace(/\s+/g, ' ');
                 
                 if (textBody.includes('Consulta Básica ao Cadastro do ICMS') || textBody.includes('Razão Social')) {
                     
-                    // Robust Field Extractor
-                    const getField = (labelPatterns) => {
+                    // Função auxiliar de busca textual
+                    const getByLabel = (label) => {
+                        // Tenta encontrar via Cheerio (estrutura de tabela)
                         let val = null;
-                        if (!Array.isArray(labelPatterns)) labelPatterns = [labelPatterns];
-                        
-                        $('b, strong, td, font').each((_, el) => {
-                            const text = $(el).text().replace(/\s+/g, ' ').trim();
-                            // Check if any pattern matches
-                            if (labelPatterns.some(p => text.includes(p))) {
-                                // Strategy 1: Next Sibling Text Node
-                                const nextNode = el.nextSibling;
-                                if (nextNode && nextNode.nodeType === 3) {
-                                    val = nextNode.nodeValue;
-                                } 
-                                // Strategy 2: Parent's text (if label is inside a TD and text is next to it)
-                                else if ($(el).parent().text().replace(/\s+/g, ' ').includes(text)) {
-                                    const parentText = $(el).parent().text().replace(/\s+/g, ' ');
-                                    const parts = parentText.split(text);
-                                    if (parts.length > 1) val = parts[1];
-                                }
-                                // Strategy 3: Next TD in TR
-                                else {
-                                    const nextTd = $(el).closest('td').next('td');
-                                    if (nextTd.length) val = nextTd.text();
+                        $('b, td, font').each((_, el) => {
+                            const t = $(el).text().replace(/\s+/g, ' ').trim();
+                            if (t.includes(label)) {
+                                // Pega o nó de texto seguinte ou o texto do pai
+                                const next = el.nextSibling;
+                                if (next && next.nodeType === 3) val = next.nodeValue;
+                                else if ($(el).parent().text().includes(label)) {
+                                     val = $(el).parent().text().split(label)[1];
                                 }
                             }
                         });
-                        return val ? val.replace(/&nbsp;/g, '').replace(/:/g, '').trim() : null;
+                        if (val) return val.replace(/[:]/g, '').trim();
+
+                        // Fallback: Busca regex no corpo do texto limpo
+                        // Ex: "Município: SALVADOR"
+                        const regex = new RegExp(`${label}\\s*[:]?\\s*([^:<]+)`, 'i');
+                        const match = textBody.match(regex);
+                        if (match && match[1]) return match[1].trim();
+                        
+                        return null;
                     };
 
-                    // Specific extraction for Activity
-                    let atividade = null;
-                    $('tr').each((_, tr) => {
-                        if ($(tr).text().includes('Atividade Econômica')) {
-                             const nextTr = $(tr).next('tr');
-                             if (nextTr.length) atividade = nextTr.text().replace(/\s+/g, ' ').trim();
-                        }
-                    });
-
-                    // Specific extraction for Município - often problematic
-                    // Sometimes it appears as "Município: SALVADOR" inside a single TD or font tag
-                    let municipio = getField(['Município:', 'Municipio:', 'Município']);
-                    
-                    // Fallback for Municipality if getField fails
-                    if (!municipio) {
-                        $('td').each((_, el) => {
-                            const txt = $(el).text().replace(/\s+/g, ' ');
-                            if (txt.includes('Município:')) {
-                                municipio = txt.split('Município:')[1]?.trim().split(' ')[0]; // Grab first word after label
-                            }
-                        });
-                    }
-
-                    const razao = getField(['Razão Social:', 'Razão Social']);
+                    const razao = getByLabel('Razão Social');
 
                     if (razao) {
                         resultData = {
                             consulta_id: processId,
-                            inscricao_estadual: getField(['Inscrição Estadual:', 'Inscrição Estadual']) || ie,
-                            cnpj: getField(['CNPJ:', 'CNPJ']),
+                            inscricao_estadual: getByLabel('Inscrição Estadual') || ie,
+                            cnpj: getByLabel('CNPJ'),
                             razao_social: razao,
-                            nome_fantasia: getField(['Nome Fantasia:', 'Nome Fantasia']),
-                            unidade_fiscalizacao: getField(['Unidade de Fiscalização:', 'Unidade de Fiscalização']),
-                            logradouro: getField(['Logradouro:', 'Logradouro']),
-                            bairro_distrito: getField(['Bairro/Distrito:', 'Bairro']),
-                            municipio: municipio,
-                            uf: getField(['UF:', 'UF']),
-                            cep: getField(['CEP:', 'CEP']),
-                            telefone: getField(['Telefone:', 'Telefone']),
-                            email: getField(['E-mail:', 'E-mail']),
-                            atividade_economica_principal: atividade,
-                            condicao: getField(['Condição:', 'Condição']),
-                            forma_pagamento: getField(['Forma de pagamento:', 'Forma de pagamento']),
-                            situacao_cadastral: getField(['Situação Cadastral Vigente:', 'Situação Cadastral']),
-                            data_situacao_cadastral: getField(['Data desta Situação Cadastral:', 'Data da Situação']),
-                            motivo_situacao_cadastral: getField(['Motivo desta Situação Cadastral:', 'Motivo da Situação']),
-                            nome_contador: getField(['Nome:', 'Contador:']), 
+                            nome_fantasia: getByLabel('Nome Fantasia'),
+                            unidade_fiscalizacao: getByLabel('Unidade de Fiscalização'),
+                            logradouro: getByLabel('Logradouro'),
+                            bairro_distrito: getByLabel('Bairro/Distrito') || getByLabel('Bairro'),
+                            municipio: getByLabel('Município') || getByLabel('Municipio'),
+                            uf: getByLabel('UF'),
+                            cep: getByLabel('CEP'),
+                            telefone: getByLabel('Telefone'),
+                            email: getByLabel('E-mail'),
+                            atividade_economica_principal: getByLabel('Atividade Econômica'),
+                            condicao: getByLabel('Condição'),
+                            forma_pagamento: getByLabel('Forma de pagamento'),
+                            situacao_cadastral: getByLabel('Situação Cadastral Vigente') || getByLabel('Situação Cadastral'),
+                            data_situacao_cadastral: getByLabel('Data desta Situação Cadastral') || getByLabel('Data da Situação'),
+                            motivo_situacao_cadastral: getByLabel('Motivo desta Situação Cadastral') || getByLabel('Motivo da Situação'),
+                            nome_contador: getByLabel('Nome') || getByLabel('Contador'), 
                             status: 'Sucesso'
                         };
                     } else {
@@ -298,9 +270,19 @@ const client = new Client({
   authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
   puppeteer: {
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    // Argumentos extras para evitar falhas de avaliação em containers
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox', 
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process', 
+      '--disable-gpu'
+    ],
   },
-  // Fix for Evaluation failed: t
+  // Cache de versão remoto para corrigir erro "Evaluation failed: t"
   webVersionCache: {
     type: "remote",
     remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
@@ -354,7 +336,7 @@ client.on('message', async (msg) => {
             let matchedRule = null;
 
             if (company) {
-                // Update status to replied if valid lead
+                // Se respondeu, atualiza status
                 if (company.campaign_status === 'sent') {
                      db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ?`, [company.id]);
                 }
@@ -387,11 +369,13 @@ client.on('message', async (msg) => {
                 try {
                     const media = await msg.downloadMedia();
                     if (media) {
+                         // Gemini aceita áudio e imagem como inlineData
                          promptParts.push({
                              inlineData: { mimeType: media.mimetype, data: media.data }
                          });
+                         
                          if (media.mimetype.startsWith('audio/')) {
-                             promptParts.push({ text: "O usuário enviou um áudio. Transcreva o conteúdo mentalmente e responda a ele de forma natural, como se estivesse ouvindo." });
+                             promptParts.push({ text: "O usuário enviou um áudio. Ouça atentamente, entenda o contexto e responda de forma natural em texto." });
                          } else if (media.mimetype.startsWith('image/')) {
                              promptParts.push({ text: "Analise a imagem enviada pelo usuário." });
                          }
@@ -506,7 +490,6 @@ app.delete('/api/imports/:id', (req, res) => {
 });
 
 app.post('/api/imports/retry/:id', (req, res) => {
-    // Basic retry stub - for robust retry, store filepath in DB
     res.json({ success: false, error: 'Re-upload required for retry in this version' });
 });
 

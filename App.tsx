@@ -50,9 +50,10 @@ function useInterval(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
-// --- EXTRACTED COMPONENTS (To fix focus issues) ---
+// --- EXTRACTED COMPONENTS ---
 
-const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
+// Using React.memo to prevent re-renders losing input focus
+const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
   <div className="card-premium p-4 flex flex-col gap-4 mb-6">
     <div className="flex flex-col md:flex-row gap-4">
       <div className="flex-1 relative">
@@ -82,12 +83,12 @@ const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onR
       <select className="input-premium py-2 text-sm" value={filters.statusWa} onChange={e => setFilters((prev: any) => ({...prev, statusWa: e.target.value}))}>
         <option value="all">Status WhatsApp: Todos</option>
         <option value="pending">Pendente</option>
-        <option value="queued">Na Fila</option>
+        <option value="queued">Fila de Envio</option>
         <option value="sent">Enviado</option>
         <option value="replied">Respondeu</option>
         <option value="interested">Interessado</option>
         <option value="not_interested">Descartado</option>
-        <option value="error">Erro Envio</option>
+        <option value="error">Erro</option>
       </select>
 
       <select className="input-premium py-2 text-sm" value={filters.hasAccountant} onChange={e => setFilters((prev: any) => ({...prev, hasAccountant: e.target.value}))}>
@@ -103,9 +104,9 @@ const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onR
       </select>
     </div>
   </div>
-);
+));
 
-const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false }: any) => (
+const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false }: any) => (
     <div className="card-premium overflow-hidden relative">
       <table className="w-full text-sm text-left mt-2">
         <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
@@ -157,7 +158,7 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
         </tbody>
       </table>
     </div>
-);
+));
 
 const StatusBadge = ({ status }: { status: string }) => {
     const map: Record<string, string> = {
@@ -204,8 +205,8 @@ const KanbanCard = ({ company, onClick }: { company: CompanyResult, onClick: () 
 
 const KanbanColumn = ({ title, status, companies, onMove, onCardClick }: any) => {
     return (
-        <div className="min-w-[280px] w-[280px] flex flex-col h-full bg-slate-100/50 rounded-2xl border border-slate-200/60">
-            <div className="p-3 border-b border-slate-200 flex justify-between items-center">
+        <div className="min-w-[280px] w-[280px] flex flex-col h-full bg-slate-100/50 rounded-2xl border border-slate-200/60 flex-shrink-0">
+            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/50 rounded-t-2xl">
                 <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${
                         status === 'interested' ? 'bg-emerald-500' :
@@ -222,6 +223,49 @@ const KanbanColumn = ({ title, status, companies, onMove, onCardClick }: any) =>
                 {companies.map((c: any) => (
                     <KanbanCard key={c.id} company={c} onClick={() => onCardClick(c)} />
                 ))}
+            </div>
+        </div>
+    )
+}
+
+const SelectedLeadModal = ({ company, onClose, onGoToChat }: any) => {
+    if (!company) return null;
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-slide-up">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 className="text-xl font-bold text-slate-800">Detalhes do Lead</h3>
+                    <button onClick={onClose}><X className="text-slate-400 hover:text-slate-600" /></button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-bold">Empresa</label>
+                        <p className="text-lg font-semibold text-slate-900">{company.razaoSocial}</p>
+                        <p className="text-sm text-slate-500">{company.cnpj} | IE: {company.inscricaoEstadual}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Município</label>
+                            <p className="text-sm font-medium">{company.municipio}</p>
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Situação</label>
+                            <p className="text-sm font-medium">{company.situacaoCadastral}</p>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-bold">Motivo da Inaptidão</label>
+                        <div className="bg-rose-50 text-rose-800 p-3 rounded-lg text-sm border border-rose-100">
+                            {company.motivoSituacao || 'Não informado'}
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                         <button onClick={onClose} className="btn-secondary">Fechar</button>
+                         <button onClick={() => onGoToChat(company)} className="btn-primary" disabled={!company.telefone}>
+                             <MessageCircle size={18} /> Ir para WhatsApp
+                         </button>
+                    </div>
+                </div>
             </div>
         </div>
     )
@@ -250,7 +294,7 @@ const App: React.FC = () => {
     reason: '',
     hasAccountant: 'all',
     status: 'all',
-    statusWa: 'all',
+    statusWa: 'all', // Added WhatsApp Status Filter
     hasPhone: 'all'
   });
   
@@ -260,6 +304,9 @@ const App: React.FC = () => {
   // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
+  // Kanban Selection
+  const [selectedKanbanLead, setSelectedKanbanLead] = useState<CompanyResult | null>(null);
+
   // Campaign Wizard State
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
   const [campaignStep, setCampaignStep] = useState(1);
@@ -278,7 +325,6 @@ const App: React.FC = () => {
     temperature: 0.7,
     aiActive: true
   });
-  const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
 
   // WhatsApp State
   const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
@@ -299,6 +345,7 @@ const App: React.FC = () => {
     setSelectedIds(new Set());
     setIsCreatingCampaign(false);
     setCampaignStep(1);
+    setSelectedKanbanLead(null);
   }, [activeTab]);
 
   useInterval(() => {
@@ -329,9 +376,9 @@ const App: React.FC = () => {
                          if (data.status === 'not_found') return;
                          setProcessProgress(data);
                          if (data.status === 'completed' || data.status === 'error') {
-                           fetchCompanies(); // Refresh data
+                           fetchCompanies(); 
                            fetchImports();
-                           fetchFilters(); // Update filters with new data
+                           fetchFilters(); 
                            setTimeout(() => setCurrentProcessId(null), 3000);
                          }
                        } catch (e) {}
@@ -445,12 +492,6 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  const toggleAIChat = async (chatId: string, currentStatus: boolean) => {
-    try {
-       // Placeholder for AI Toggle endpoint if implemented in backend
-    } catch (e) { console.error(e); }
-  };
-
   const createCampaign = async () => {
       if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione empresas e dê um nome à campanha.');
       
@@ -504,7 +545,7 @@ const App: React.FC = () => {
         
       const phoneMatch = filters.hasPhone === 'all' ? true :
         filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
-
+        
       const waMatch = filters.statusWa === 'all' ? true :
         c.campaignStatus === filters.statusWa;
 
@@ -529,15 +570,15 @@ const App: React.FC = () => {
     }
   };
 
-  const openChatFromKanban = (company: CompanyResult) => {
+  const goToChat = (company: CompanyResult) => {
       if(company.telefone) {
           const raw = company.telefone.replace(/\D/g, '');
-          // Basic Brazil assumption
           const target = raw.length < 12 ? '55' + raw : raw;
           const chatId = target + '@c.us';
           setActiveTab('whatsapp');
           setActiveChat(chatId);
           fetchMessages(chatId);
+          setSelectedKanbanLead(null); // Close modal
       } else {
           alert('Empresa sem telefone cadastrado.');
       }
@@ -548,6 +589,7 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
       
+      {/* Sidebar */}
       <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
         <div className="p-4 flex items-center justify-between border-b border-brand-800/50">
           <div className="flex items-center gap-2 overflow-hidden">
@@ -597,6 +639,7 @@ const App: React.FC = () => {
         </nav>
       </aside>
 
+      {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-slate-50 relative">
         <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-slate-800">
@@ -733,41 +776,49 @@ const App: React.FC = () => {
                 selectedIds={selectedIds} 
                 toggleSelection={toggleSelection} 
                 toggleSelectAll={toggleSelectAll} 
+                selectable={true}
               />
             </div>
           )}
 
           {activeTab === 'kanban' && (
-              <div className="h-full flex gap-4 overflow-x-auto pb-4">
-                  <KanbanColumn 
-                    title="Envio Pendente" 
-                    status="pending" 
-                    companies={companies.filter(c => c.campaignStatus === 'pending' || c.campaignStatus === 'queued' || !c.campaignStatus)} 
-                    onCardClick={openChatFromKanban}
-                  />
-                  <KanbanColumn 
-                    title="Enviados" 
-                    status="sent" 
-                    companies={companies.filter(c => c.campaignStatus === 'sent' || c.campaignStatus === 'delivered')} 
-                    onCardClick={openChatFromKanban}
-                  />
-                  <KanbanColumn 
-                    title="Responderam" 
-                    status="replied" 
-                    companies={companies.filter(c => c.campaignStatus === 'replied')} 
-                    onCardClick={openChatFromKanban}
-                  />
-                  <KanbanColumn 
-                    title="Interessados" 
-                    status="interested" 
-                    companies={companies.filter(c => c.campaignStatus === 'interested')} 
-                    onCardClick={openChatFromKanban}
-                  />
-                   <KanbanColumn 
-                    title="Descartados" 
-                    status="not_interested" 
-                    companies={companies.filter(c => c.campaignStatus === 'not_interested' || c.campaignStatus === 'skipped' || c.campaignStatus === 'error')} 
-                    onCardClick={openChatFromKanban}
+              <div className="h-full">
+                  <div className="flex gap-4 overflow-x-auto pb-4 h-[calc(100vh-140px)]">
+                      <KanbanColumn 
+                        title="Envio Pendente" 
+                        status="pending" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'pending' || c.campaignStatus === 'queued' || !c.campaignStatus)} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Enviados" 
+                        status="sent" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'sent' || c.campaignStatus === 'delivered')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Responderam" 
+                        status="replied" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'replied')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Interessados" 
+                        status="interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'interested')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                       <KanbanColumn 
+                        title="Descartados" 
+                        status="not_interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'not_interested' || c.campaignStatus === 'skipped' || c.campaignStatus === 'error')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                  </div>
+                  <SelectedLeadModal 
+                    company={selectedKanbanLead} 
+                    onClose={() => setSelectedKanbanLead(null)} 
+                    onGoToChat={goToChat}
                   />
               </div>
           )}
