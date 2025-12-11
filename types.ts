@@ -7,19 +7,21 @@ export enum Status {
 }
 
 export enum CampaignStatus {
-  PENDING = 'pending',     // Not contacted yet
-  QUEUED = 'queued',       // In sending queue
-  SENT = 'sent',           // Message sent
-  DELIVERED = 'delivered', // Double check
-  READ = 'read',           // Blue tick
-  REPLIED = 'replied',     // Customer answered
-  INTERESTED = 'interested', // Lead conversion
-  NOT_INTERESTED = 'not_interested' // Lead lost
+  PENDING = 'pending',     
+  QUEUED = 'queued',       
+  SENT = 'sent',           
+  DELIVERED = 'delivered', 
+  READ = 'read',           
+  REPLIED = 'replied',     
+  INTERESTED = 'interested', 
+  NOT_INTERESTED = 'not_interested',
+  ERROR = 'error',
+  SKIPPED = 'skipped'
 }
 
 export interface CompanyResult {
   id: string;
-  consultaId?: string; // Link to the import batch
+  consultaId?: string; 
   inscricaoEstadual: string;
   cnpj: string;
   razaoSocial: string;
@@ -31,7 +33,7 @@ export interface CompanyResult {
   status: Status;
   
   // Campaign Fields
-  campaignStatus: CampaignStatus;
+  campaignStatus: string; // Using string to allow DB values easily
   lastContacted?: string;
   lastMessageSent?: string;
   aiAnalysis?: string;
@@ -46,14 +48,14 @@ export interface ProcessingStats {
 
 export interface Instruction {
   id: string;
-  title: string;      // Ex: "Argumento de Preço", "Passo a Passo"
+  title: string;      
   type: 'simple' | 'flow';
-  content: string;    // O texto para a IA
+  content: string;    
 }
 
 export interface KnowledgeRule {
   id: string;
-  motivoSituacao: string; // The Trigger
+  motivoSituacao: string; 
   instructions: Instruction[];
   isActive: boolean;
 }
