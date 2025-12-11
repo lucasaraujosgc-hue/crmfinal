@@ -130,7 +130,17 @@ async function runScraping(filepath, processId) {
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800'],
+            // Argumentos robustos para Docker para evitar crashes
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--window-size=1280,800'
+            ],
             ignoreHTTPSErrors: true
         });
 
@@ -161,11 +171,13 @@ async function runScraping(filepath, processId) {
                 await page.waitForSelector(inputSelector, { timeout: 15000 });
                 
                 // Limpa e digita
-                await page.$eval(inputSelector, el => el.value = '');
+                await page.evaluate((sel) => { document.querySelector(sel).value = '' }, inputSelector);
                 await page.type(inputSelector, ie, { delay: 100 });
                 
                 // Clica no botão específico name="B2"
                 const submitSelector = 'input[name="B2"]';
+                
+                // Estratégia de clique segura
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => console.log('Nav timeout ignored')),
                     page.click(submitSelector)
@@ -174,60 +186,63 @@ async function runScraping(filepath, processId) {
                 await page.waitForSelector('body', { timeout: 15000 });
                 const content = await page.content();
                 const $ = cheerio.load(content);
-                const textBody = $('body').text().replace(/\s+/g, ' ');
-                
-                if (textBody.includes('Consulta Básica ao Cadastro do ICMS') || textBody.includes('Razão Social')) {
-                    
-                    // Função auxiliar de busca textual
-                    const getByLabel = (label) => {
-                        // Tenta encontrar via Cheerio (estrutura de tabela)
-                        let val = null;
-                        $('b, td, font').each((_, el) => {
-                            const t = $(el).text().replace(/\s+/g, ' ').trim();
-                            if (t.includes(label)) {
-                                // Pega o nó de texto seguinte ou o texto do pai
-                                const next = el.nextSibling;
-                                if (next && next.nodeType === 3) val = next.nodeValue;
-                                else if ($(el).parent().text().includes(label)) {
-                                     val = $(el).parent().text().split(label)[1];
-                                }
-                            }
-                        });
-                        if (val) return val.replace(/[:]/g, '').trim();
+                const textBody = $('body').text();
+                // Versão normalizada para regex
+                const textBodyNorm = textBody.replace(/\s+/g, ' ');
 
-                        // Fallback: Busca regex no corpo do texto limpo
-                        // Ex: "Município: SALVADOR"
+                if (textBodyNorm.includes('Consulta Básica ao Cadastro do ICMS') || textBodyNorm.includes('Razão Social')) {
+                    
+                    // Regex helper para extrair campos que podem estar mal formatados no HTML
+                    const extractRegex = (label) => {
                         const regex = new RegExp(`${label}\\s*[:]?\\s*([^:<]+)`, 'i');
-                        const match = textBody.match(regex);
-                        if (match && match[1]) return match[1].trim();
-                        
+                        const match = textBodyNorm.match(regex);
+                        if (match && match[1]) {
+                            return match[1].replace(/&nbsp;/g, '').trim();
+                        }
                         return null;
                     };
 
-                    const razao = getByLabel('Razão Social');
+                    // DOM helper
+                    const getByDom = (label) => {
+                         let val = null;
+                         $('b, td, font').each((_, el) => {
+                             if($(el).text().includes(label)) {
+                                 const next = el.nextSibling;
+                                 if(next && next.nodeType === 3) val = next.nodeValue;
+                                 else {
+                                     // Tenta pegar do pai se o label for parte do texto
+                                     const pText = $(el).parent().text();
+                                     if(pText.includes(label)) val = pText.split(label)[1];
+                                 }
+                             }
+                         });
+                         return val ? val.replace(/[:]/g, '').trim() : null;
+                    };
+
+                    const razao = getByDom('Razão Social') || extractRegex('Razão Social');
 
                     if (razao) {
                         resultData = {
                             consulta_id: processId,
-                            inscricao_estadual: getByLabel('Inscrição Estadual') || ie,
-                            cnpj: getByLabel('CNPJ'),
+                            inscricao_estadual: extractRegex('Inscrição Estadual') || ie,
+                            cnpj: extractRegex('CNPJ'),
                             razao_social: razao,
-                            nome_fantasia: getByLabel('Nome Fantasia'),
-                            unidade_fiscalizacao: getByLabel('Unidade de Fiscalização'),
-                            logradouro: getByLabel('Logradouro'),
-                            bairro_distrito: getByLabel('Bairro/Distrito') || getByLabel('Bairro'),
-                            municipio: getByLabel('Município') || getByLabel('Municipio'),
-                            uf: getByLabel('UF'),
-                            cep: getByLabel('CEP'),
-                            telefone: getByLabel('Telefone'),
-                            email: getByLabel('E-mail'),
-                            atividade_economica_principal: getByLabel('Atividade Econômica'),
-                            condicao: getByLabel('Condição'),
-                            forma_pagamento: getByLabel('Forma de pagamento'),
-                            situacao_cadastral: getByLabel('Situação Cadastral Vigente') || getByLabel('Situação Cadastral'),
-                            data_situacao_cadastral: getByLabel('Data desta Situação Cadastral') || getByLabel('Data da Situação'),
-                            motivo_situacao_cadastral: getByLabel('Motivo desta Situação Cadastral') || getByLabel('Motivo da Situação'),
-                            nome_contador: getByLabel('Nome') || getByLabel('Contador'), 
+                            nome_fantasia: extractRegex('Nome Fantasia'),
+                            unidade_fiscalizacao: extractRegex('Unidade de Fiscalização'),
+                            logradouro: extractRegex('Logradouro'),
+                            bairro_distrito: extractRegex('Bairro/Distrito') || extractRegex('Bairro'),
+                            municipio: extractRegex('Município') || extractRegex('Municipio'), // Regex pega melhor
+                            uf: extractRegex('UF'),
+                            cep: extractRegex('CEP'),
+                            telefone: extractRegex('Telefone'),
+                            email: extractRegex('E-mail'),
+                            atividade_economica_principal: extractRegex('Atividade Econômica'),
+                            condicao: extractRegex('Condição'),
+                            forma_pagamento: extractRegex('Forma de pagamento'),
+                            situacao_cadastral: extractRegex('Situação Cadastral Vigente') || extractRegex('Situação Cadastral'),
+                            data_situacao_cadastral: extractRegex('Data desta Situação Cadastral'),
+                            motivo_situacao_cadastral: extractRegex('Motivo desta Situação Cadastral') || extractRegex('Motivo'),
+                            nome_contador: extractRegex('Nome') || extractRegex('Contador'), 
                             status: 'Sucesso'
                         };
                     } else {
@@ -270,7 +285,7 @@ const client = new Client({
   authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
   puppeteer: {
     headless: true,
-    // Argumentos extras para evitar falhas de avaliação em containers
+    // Argumentos críticos para rodar em Docker sem crashar
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox', 
@@ -282,7 +297,7 @@ const client = new Client({
       '--disable-gpu'
     ],
   },
-  // Cache de versão remoto para corrigir erro "Evaluation failed: t"
+  // Correção para erro "Evaluation failed: t" em versões recentes
   webVersionCache: {
     type: "remote",
     remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
