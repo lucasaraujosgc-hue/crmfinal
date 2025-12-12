@@ -132,7 +132,10 @@ function decodeHTMLEntities(text) {
         '&nbsp;': ' ',
         '&atilde;': 'ã',
         '&ccedil;': 'ç',
-        '&iacute;': 'í'
+        '&iacute;': 'í',
+        '&ocirc;': 'ô',
+        '&otilde;': 'õ',
+        '&uacute;': 'ú'
     };
     return text.replace(/&[a-z]+;/g, match => entities[match] || match);
 }
@@ -150,12 +153,15 @@ async function runScraping(filepath, processId) {
         const cleanText = rawText.replace(/\s+/g, ''); 
         
         const ies = new Set();
-        // Captura XX.XXX.XXX-XX ou XXXXXXXX-XX
-        const regexStrict = /(\d{1,3}\.?\d{1,3}\.?\d{1,3})-?/g;
+        
+        // Regex aprimorada para capturar IE seguida de sufixo (Ex: 201.576.135-ME)
+        // Isso evita pegar o número seguinte (CPF/CNPJ) que não tem o sufixo.
+        const regexStrict = /(\d{2,3}\.?\d{3}\.?\d{3})-[A-Z]{2}/g;
         
         let match;
         while ((match = regexStrict.exec(cleanText)) !== null) {
-            const ieDigits = match[0].replace(/\D/g, '');
+            // match[1] contém apenas os dígitos da IE
+            const ieDigits = match[1].replace(/\D/g, '');
             // IE Bahia tem 8 ou 9 dígitos
             if (ieDigits.length >= 8 && ieDigits.length <= 9) {
                  ies.add(ieDigits);
@@ -232,6 +238,7 @@ async function runScraping(filepath, processId) {
                     page.click(submitSelector)
                 ]);
 
+                // Espera pelo corpo ou algum elemento chave
                 await page.waitForSelector('body', { timeout: 15000 });
                 const content = await page.content();
                 const $ = cheerio.load(content);
@@ -263,30 +270,46 @@ async function runScraping(filepath, processId) {
 
                     const extractField = (keys) => {
                         for (const key of keys) {
-                            const element = $(`td, b, font`).filter((i, el) => {
+                            // Find B or TD tags that contain the key text
+                            const element = $(`b, td, font`).filter((i, el) => {
+                                // Cheerio decodes entities in .text(), so 'Raz&atilde;o' becomes 'Razão'
                                 const text = $(el).text().trim();
-                                return text.startsWith(key) || text === key;
+                                // Clean up the key for comparison (e.g. remove &nbsp from key if needed, but Cheerio handles entities)
+                                // We check if the element STARTS with the label
+                                const cleanKey = key.replace(/&[a-z]+;/g, ''); // Simple strip for basic check if needed, but text() is better
+                                return text.startsWith(key) || text.startsWith(decodeHTMLEntities(key));
                             }).first();
 
                             if (element.length > 0) {
-                                let text = element.text().trim();
-                                if (text.length > key.length) {
-                                    return text.replace(key, '').trim();
-                                }
+                                // CASE 1: Value is in the Next Sibling (Text Node)
+                                // Ex: <b>Logradouro:</b> RUA XYZ
                                 const nextSibling = element[0].nextSibling;
                                 if (nextSibling && nextSibling.nodeType === 3) {
-                                    return $(nextSibling).text().trim();
+                                    const val = $(nextSibling).text().trim();
+                                    if(val) return val;
                                 }
-                                const nextEl = element.next();
-                                if (nextEl.length > 0) {
-                                    return nextEl.text().trim();
+
+                                // CASE 2: Value is in the Next Element (TD)
+                                // Ex: <td><b>Logradouro:</b></td><td>RUA XYZ</td>
+                                const nextTd = element.closest('td').next('td');
+                                if (nextTd.length > 0) {
+                                    const val = nextTd.text().trim();
+                                    if(val) return val;
                                 }
-                                const parentTd = element.closest('td');
-                                if (parentTd.length > 0) {
-                                    const nextTd = parentTd.next('td');
-                                    if (nextTd.length > 0) {
-                                        return nextTd.text().trim();
-                                    }
+
+                                // CASE 3: Value is in the Next Row (TR)
+                                // Ex: <tr><td><b>Atividade:</b></td></tr><tr><td>1234 - ...</td></tr>
+                                const nextTr = element.closest('tr').next('tr');
+                                if (nextTr.length > 0) {
+                                    const val = nextTr.find('td').first().text().trim();
+                                    if(val) return val;
+                                }
+
+                                // CASE 4: Value is inside the same element but after label
+                                const fullText = element.text().trim();
+                                const labelText = decodeHTMLEntities(key);
+                                if (fullText.length > labelText.length) {
+                                    return fullText.replace(labelText, '').trim();
                                 }
                             }
                         }
@@ -317,9 +340,12 @@ async function runScraping(filepath, processId) {
                         status: 'Sucesso'
                     };
                     
+                    // Cleanup extra encoding artifacts
                     Object.keys(resultData).forEach(key => {
                         if (typeof resultData[key] === 'string') {
-                            resultData[key] = decodeHTMLEntities(resultData[key]);
+                            // Replace &nbsp; explicitly then decode others
+                            let val = resultData[key].replace(/\u00a0/g, ' '); 
+                            resultData[key] = decodeHTMLEntities(val).trim();
                         }
                     });
 
