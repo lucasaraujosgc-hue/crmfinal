@@ -4,7 +4,7 @@ import {
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
   BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
-  ToggleLeft, ToggleRight
+  ToggleLeft, ToggleRight, Power
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -108,7 +108,7 @@ const FilterBar = React.memo(({ filters, setFilters, availableCities, availableR
   </div>
 ));
 
-const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false }: any) => (
+const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi }: any) => (
     <div className="card-premium overflow-hidden relative">
       <table className="w-full text-sm text-left mt-2">
         <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
@@ -123,6 +123,7 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
             <th className="px-6 py-4">Empresa</th>
             <th className="px-6 py-4">Situação</th>
             <th className="px-6 py-4">Status WhatsApp</th>
+            <th className="px-6 py-4 text-center">IA Ativa</th>
             <th className="px-6 py-4">Motivo</th>
             <th className="px-6 py-4">Município</th>
           </tr>
@@ -138,8 +139,12 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                   </td>
               )}
               <td className="px-6 py-4">
-                <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
-                <p className="text-xs text-slate-500">{company.inscricaoEstadual} | {company.cnpj}</p>
+                <div className="flex items-center gap-2">
+                    <div>
+                        <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
+                        <p className="text-xs text-slate-500">{company.inscricaoEstadual} | {company.cnpj}</p>
+                    </div>
+                </div>
               </td>
               <td className="px-6 py-4">
                 <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
@@ -150,6 +155,19 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
               </td>
               <td className="px-6 py-4">
                    <StatusBadge status={company.campaignStatus} />
+              </td>
+              <td className="px-6 py-4 text-center">
+                  <button 
+                    onClick={() => onToggleAi && onToggleAi(company.id, company.aiActive)}
+                    className={`p-1.5 rounded-full transition-colors ${
+                        company.aiActive 
+                        ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' 
+                        : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                    }`}
+                    title={company.aiActive ? "Desativar IA" : "Ativar IA"}
+                  >
+                      {company.aiActive ? <Bot size={18} /> : <Power size={18} />}
+                  </button>
               </td>
               <td className="px-6 py-4 text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
                   {company.motivoSituacao || 'N/D'}
@@ -194,7 +212,10 @@ const KanbanCard: React.FC<{ company: CompanyResult, onClick: () => void }> = ({
     <div onClick={onClick} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-brand-300 group">
         <div className="flex justify-between items-start mb-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase">{company.inscricaoEstadual}</span>
-            {company.telefone && <MessageCircle size={14} className="text-brand-500"/>}
+            <div className="flex gap-1">
+                {company.aiActive && <Bot size={14} className="text-emerald-500" />}
+                {company.telefone && <MessageCircle size={14} className="text-brand-500"/>}
+            </div>
         </div>
         <h4 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2">{company.razaoSocial}</h4>
         <p className="text-xs text-slate-500 mb-2 truncate">{company.municipio}</p>
@@ -869,6 +890,7 @@ const App: React.FC = () => {
                 toggleSelection={toggleSelection} 
                 toggleSelectAll={toggleSelectAll} 
                 selectable={true}
+                onToggleAi={toggleLeadAI}
               />
             </div>
           )}
@@ -967,7 +989,7 @@ const App: React.FC = () => {
                                <div className="space-y-4">
                                    <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
                                    <div className="h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
-                                      <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} toggleSelectAll={toggleSelectAll} selectable={true} />
+                                      <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} toggleSelectAll={toggleSelectAll} selectable={true} onToggleAi={toggleLeadAI} />
                                    </div>
                                    <div className="flex justify-between pt-4">
                                        <button onClick={() => setCampaignStep(1)} className="btn-secondary">Voltar</button>
@@ -1016,9 +1038,12 @@ const App: React.FC = () => {
               <div className="flex-1 card-premium flex flex-col">
                 {activeChat ? (
                   <>
-                     <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                     <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white rounded-t-2xl">
                         <div className="flex items-center gap-3">
-                            <h3 className="font-bold">{chats.find(c => c.id === activeChat)?.name}</h3>
+                            <div>
+                                <h3 className="font-bold text-slate-800">{chats.find(c => c.id === activeChat)?.name}</h3>
+                                <p className="text-xs text-slate-500">{activeChat.replace('@c.us', '')}</p>
+                            </div>
                             {/* PER-CHAT AI TOGGLE */}
                             {activeChatCompany && (
                                 <button 
@@ -1030,8 +1055,17 @@ const App: React.FC = () => {
                                     }`}
                                     title={activeChatCompany.aiActive ? "Desativar IA para este contato" : "Ativar IA para este contato"}
                                 >
-                                    <Bot size={16} className={activeChatCompany.aiActive ? "text-emerald-500" : "text-slate-400"} />
-                                    <span className="text-xs font-bold">{activeChatCompany.aiActive ? 'IA Auto' : 'IA Off'}</span>
+                                    {activeChatCompany.aiActive ? (
+                                        <>
+                                            <Bot size={16} className="text-emerald-500" />
+                                            <span className="text-xs font-bold">IA Auto</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Power size={16} className="text-slate-400" />
+                                            <span className="text-xs font-bold">IA Off</span>
+                                        </>
+                                    )}
                                 </button>
                             )}
                         </div>
@@ -1039,11 +1073,11 @@ const App: React.FC = () => {
                              <button onClick={() => {
                                  const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
                                  if(comp) updateLeadStatus(comp.id, 'interested');
-                             }} className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200">Interessado</button>
+                             }} className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 font-medium">Interessado</button>
                              <button onClick={() => {
                                  const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
                                  if(comp) updateLeadStatus(comp.id, 'not_interested');
-                             }} className="text-xs px-3 py-1 bg-rose-100 text-rose-700 rounded-lg hover:bg-rose-200">Descartar</button>
+                             }} className="text-xs px-3 py-1 bg-rose-100 text-rose-700 rounded-lg hover:bg-rose-200 font-medium">Descartar</button>
                         </div>
                      </div>
                      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#efeae2]">
@@ -1056,13 +1090,16 @@ const App: React.FC = () => {
                            </div>
                         ))}
                      </div>
-                     <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2">
-                        <input type="text" className="flex-1 bg-slate-100 rounded-full px-4 py-2 outline-none" value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
-                        <button onClick={sendMessage} className="p-2 bg-brand-600 text-white rounded-full"><Send size={18} /></button>
+                     <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 rounded-b-2xl">
+                        <input type="text" className="flex-1 bg-slate-100 rounded-full px-4 py-2 outline-none focus:ring-2 focus:ring-brand-200 transition-all" value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Digite uma mensagem..." />
+                        <button onClick={sendMessage} className="p-2 bg-brand-600 text-white rounded-full hover:bg-brand-700 transition-colors"><Send size={18} /></button>
                      </div>
                   </>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center text-slate-400">Selecione uma conversa</div>
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+                      <MessageCircle size={48} className="mb-2 opacity-20"/>
+                      <p>Selecione uma conversa para iniciar o atendimento</p>
+                  </div>
                 )}
               </div>
             </div>
