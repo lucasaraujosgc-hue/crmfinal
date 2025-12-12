@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
-  BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit
+  BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
+  ToggleLeft, ToggleRight
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -575,6 +576,19 @@ const App: React.FC = () => {
       } catch(e) { console.error(e); }
   };
 
+  const toggleLeadAI = async (id: string, currentStatus: boolean | undefined) => {
+      const newStatus = !currentStatus;
+      try {
+          await fetch('/api/leads/toggle-ai', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ id, active: newStatus })
+          });
+          // Update local state to reflect change immediately
+          setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
+      } catch(e) { console.error(e); }
+  };
+
   // --- Filtering Logic ---
 
   const filteredCompanies = useMemo(() => {
@@ -635,6 +649,17 @@ const App: React.FC = () => {
 
   // --- Render ---
 
+  // Helper to find company in active chat
+  const activeChatCompany = useMemo(() => {
+      if (!activeChat || companies.length === 0) return null;
+      const cleanChatPhone = activeChat.replace(/\D/g, '');
+      return companies.find(c => {
+          if (!c.telefone) return false;
+          const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
+          return cleanChatPhone.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(cleanChatPhone);
+      });
+  }, [activeChat, companies]);
+
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
       
@@ -686,6 +711,24 @@ const App: React.FC = () => {
             </button>
           ))}
         </nav>
+
+        {/* Global AI Toggle in Sidebar */}
+        {isSidebarOpen && (
+            <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Bot size={18} className={aiConfig.aiActive ? "text-emerald-400" : "text-slate-400"} />
+                        <span className="text-sm font-medium">IA Geral</span>
+                    </div>
+                    <button 
+                        onClick={() => saveAiConfig({...aiConfig, aiActive: !aiConfig.aiActive})}
+                        className={`w-10 h-5 rounded-full flex items-center transition-all p-1 ${aiConfig.aiActive ? 'bg-emerald-500 justify-end' : 'bg-slate-600 justify-start'}`}
+                    >
+                        <div className="w-3 h-3 bg-white rounded-full shadow-md"></div>
+                    </button>
+                </div>
+            </div>
+        )}
       </aside>
 
       {/* Main Content */}
@@ -974,12 +1017,29 @@ const App: React.FC = () => {
                 {activeChat ? (
                   <>
                      <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                        <h3 className="font-bold">{chats.find(c => c.id === activeChat)?.name}</h3>
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-3">
+                            <h3 className="font-bold">{chats.find(c => c.id === activeChat)?.name}</h3>
+                            {/* PER-CHAT AI TOGGLE */}
+                            {activeChatCompany && (
+                                <button 
+                                    onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all ${
+                                        activeChatCompany.aiActive 
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
+                                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                    title={activeChatCompany.aiActive ? "Desativar IA para este contato" : "Ativar IA para este contato"}
+                                >
+                                    <Bot size={16} className={activeChatCompany.aiActive ? "text-emerald-500" : "text-slate-400"} />
+                                    <span className="text-xs font-bold">{activeChatCompany.aiActive ? 'IA Auto' : 'IA Off'}</span>
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex gap-2 items-center">
                              <button onClick={() => {
                                  const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
                                  if(comp) updateLeadStatus(comp.id, 'interested');
-                             }} className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200">Marcar Interessado</button>
+                             }} className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200">Interessado</button>
                              <button onClick={() => {
                                  const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
                                  if(comp) updateLeadStatus(comp.id, 'not_interested');

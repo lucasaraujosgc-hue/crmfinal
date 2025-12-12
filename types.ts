@@ -37,6 +37,7 @@ export interface CompanyResult {
   lastContacted?: string;
   lastMessageSent?: string;
   aiAnalysis?: string;
+  aiActive?: boolean; // New field for per-contact AI toggle
 }
 
 export interface ProcessingStats {

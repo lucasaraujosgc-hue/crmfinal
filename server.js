@@ -88,9 +88,17 @@ db.serialize(() => {
     status TEXT,
     campaign_status TEXT DEFAULT 'pending',
     last_contacted TEXT,
+    ai_active INTEGER DEFAULT 1, 
     FOREIGN KEY(consulta_id) REFERENCES consulta(id),
     FOREIGN KEY(campaign_id) REFERENCES campaign(id)
-  )`);
+  )`, (err) => {
+      // Safe migration for existing databases: Try to add the column if it doesn't exist
+      if (!err) {
+          db.run("ALTER TABLE resultado ADD COLUMN ai_active INTEGER DEFAULT 1", (err) => {
+              // Ignore error if column already exists
+          });
+      }
+  });
 });
 
 // Load AI Config
@@ -155,14 +163,11 @@ async function runScraping(filepath, processId) {
         const ies = new Set();
         
         // Regex aprimorada para capturar IE seguida de sufixo (Ex: 201.576.135-ME)
-        // Isso evita pegar o número seguinte (CPF/CNPJ) que não tem o sufixo.
         const regexStrict = /(\d{2,3}\.?\d{3}\.?\d{3})-[A-Z]{2}/g;
         
         let match;
         while ((match = regexStrict.exec(cleanText)) !== null) {
-            // match[1] contém apenas os dígitos da IE
             const ieDigits = match[1].replace(/\D/g, '');
-            // IE Bahia tem 8 ou 9 dígitos
             if (ieDigits.length >= 8 && ieDigits.length <= 9) {
                  ies.add(ieDigits);
             }
@@ -270,42 +275,51 @@ async function runScraping(filepath, processId) {
 
                     const extractField = (keys) => {
                         for (const key of keys) {
-                            // Find B or TD tags that contain the key text
                             const element = $(`b, td, font`).filter((i, el) => {
-                                // Cheerio decodes entities in .text(), so 'Raz&atilde;o' becomes 'Razão'
                                 const text = $(el).text().trim();
-                                // Clean up the key for comparison (e.g. remove &nbsp from key if needed, but Cheerio handles entities)
-                                // We check if the element STARTS with the label
-                                const cleanKey = key.replace(/&[a-z]+;/g, ''); // Simple strip for basic check if needed, but text() is better
+                                const cleanKey = key.replace(/&[a-z]+;/g, ''); 
                                 return text.startsWith(key) || text.startsWith(decodeHTMLEntities(key));
                             }).first();
 
                             if (element.length > 0) {
-                                // CASE 1: Value is in the Next Sibling (Text Node)
-                                // Ex: <b>Logradouro:</b> RUA XYZ
+                                // CASE 1: Next Sibling (Text Node)
                                 const nextSibling = element[0].nextSibling;
                                 if (nextSibling && nextSibling.nodeType === 3) {
                                     const val = $(nextSibling).text().trim();
                                     if(val) return val;
                                 }
 
+                                // CASE 1.5: Parent Text Content (Fix for <td><b>Label:</b> Value</td>)
+                                const parent = element.parent();
+                                if (parent.length > 0) {
+                                    const parentText = parent.text().trim();
+                                    const labelText = element.text().trim();
+                                    
+                                    if (parentText.startsWith(labelText)) {
+                                        const potentialVal = parentText.substring(labelText.length).trim();
+                                        if (potentialVal.length > 0) {
+                                            return potentialVal;
+                                        }
+                                    }
+                                }
+
                                 // CASE 2: Value is in the Next Element (TD)
-                                // Ex: <td><b>Logradouro:</b></td><td>RUA XYZ</td>
                                 const nextTd = element.closest('td').next('td');
                                 if (nextTd.length > 0) {
                                     const val = nextTd.text().trim();
-                                    if(val) return val;
+                                    // VALIDATION: Ensure the value doesn't look like another field label (e.g., "UF:")
+                                    const isAnotherLabel = val.includes(':') && val.length < 20; 
+                                    if(val && !isAnotherLabel) return val;
                                 }
 
                                 // CASE 3: Value is in the Next Row (TR)
-                                // Ex: <tr><td><b>Atividade:</b></td></tr><tr><td>1234 - ...</td></tr>
                                 const nextTr = element.closest('tr').next('tr');
                                 if (nextTr.length > 0) {
                                     const val = nextTr.find('td').first().text().trim();
                                     if(val) return val;
                                 }
-
-                                // CASE 4: Value is inside the same element but after label
+                                
+                                // CASE 4: Value inside element (fallback)
                                 const fullText = element.text().trim();
                                 const labelText = decodeHTMLEntities(key);
                                 if (fullText.length > labelText.length) {
@@ -340,10 +354,8 @@ async function runScraping(filepath, processId) {
                         status: 'Sucesso'
                     };
                     
-                    // Cleanup extra encoding artifacts
                     Object.keys(resultData).forEach(key => {
                         if (typeof resultData[key] === 'string') {
-                            // Replace &nbsp; explicitly then decode others
                             let val = resultData[key].replace(/\u00a0/g, ' '); 
                             resultData[key] = decodeHTMLEntities(val).trim();
                         }
@@ -359,7 +371,6 @@ async function runScraping(filepath, processId) {
                 resultData.status = 'Erro: ' + err.message;
             }
 
-            // Double check cancellation before insert
             if (activeScrapes.get(processId) === false) break;
 
             const cols = Object.keys(resultData).join(',');
@@ -374,7 +385,6 @@ async function runScraping(filepath, processId) {
         }
 
         if (activeScrapes.get(processId) === false) {
-             // If cancelled, just leave it (deletion handled by API)
              console.log(`[Scraper] Finalizando thread cancelada ${processId}`);
         } else {
              db.run('UPDATE consulta SET status = "completed", end_time = ? WHERE id = ?', [new Date().toISOString(), processId]);
@@ -453,6 +463,8 @@ client.on('ready', () => {
 // --- IA MESSAGE HANDLING ---
 client.on('message', async (msg) => {
     if (msg.fromMe) return; 
+    
+    // Global AI Check
     if (!aiConfig.aiActive) return;
 
     const rawPhone = msg.from.replace(/\D/g, '');
@@ -462,6 +474,13 @@ client.on('message', async (msg) => {
 
     db.get(`SELECT * FROM resultado WHERE telefone LIKE ? ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix}`], async (err, company) => {
             
+            // Check specific AI status for this lead (if exists)
+            // If ai_active is 0 (false), we stop here.
+            if (company && company.ai_active === 0) {
+                console.log(`[AI] Desativada para empresa ${company.razao_social}`);
+                return;
+            }
+
             let systemInstruction = aiConfig.persona;
             
             if (company && company.campaign_id) {
@@ -616,7 +635,8 @@ app.get('/get-all-results', (req, res) => {
         motivoSituacao: r.motivo_situacao_cadastral,
         nomeContador: r.nome_contador,
         status: r.status,
-        campaignStatus: r.campaign_status || 'pending'
+        campaignStatus: r.campaign_status || 'pending',
+        aiActive: r.ai_active === 1
     }));
     res.json(formatted);
   });
@@ -784,6 +804,15 @@ app.post('/api/whatsapp/send', async (req, res) => {
 app.post('/api/leads/status', (req, res) => {
     const { id, status } = req.body;
     db.run('UPDATE resultado SET campaign_status = ? WHERE id = ?', [status, id], (err) => {
+        if(err) return res.status(500).json({error: err.message});
+        res.json({success: true});
+    });
+});
+
+// Toggle AI per lead
+app.post('/api/leads/toggle-ai', (req, res) => {
+    const { id, active } = req.body;
+    db.run('UPDATE resultado SET ai_active = ? WHERE id = ?', [active ? 1 : 0, id], (err) => {
         if(err) return res.status(500).json({error: err.message});
         res.json({success: true});
     });
