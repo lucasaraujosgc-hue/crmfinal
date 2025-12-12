@@ -24,6 +24,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3000;
 
+// --- GLOBAL STATE FOR SCRAPING CONTROL ---
+const activeScrapes = new Map(); // Stores processId -> boolean (true = running, false = abort)
+
 // --- PERSISTENCE SETUP ---
 const DATA_DIR = path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
@@ -136,6 +139,8 @@ function decodeHTMLEntities(text) {
 
 async function runScraping(filepath, processId) {
     console.log(`[Scraper] Iniciando para arquivo: ${filepath}`);
+    activeScrapes.set(processId, true); // Mark as active
+    
     let browser = null;
     
     try {
@@ -162,6 +167,7 @@ async function runScraping(filepath, processId) {
 
         if (ieList.length === 0) {
             db.run('UPDATE consulta SET status = "error", total = 0 WHERE id = ?', [processId]);
+            activeScrapes.delete(processId);
             return;
         }
 
@@ -187,6 +193,12 @@ async function runScraping(filepath, processId) {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
         for (let i = 0; i < ieList.length; i++) {
+            // Check cancellation signal
+            if (activeScrapes.get(processId) === false) {
+                console.log(`[Scraper] Processo ${processId} cancelado pelo usuário.`);
+                break;
+            }
+
             const ie = ieList[i];
             let resultData = {
                 consulta_id: processId,
@@ -224,12 +236,10 @@ async function runScraping(filepath, processId) {
                 const content = await page.content();
                 const $ = cheerio.load(content);
                 
-                // Check if page contains valid data
                 const pageText = $('body').text();
                 
                 if (pageText.includes('Consulta Básica ao Cadastro do ICMS') || pageText.includes('Razão Social') || pageText.includes('Raz&atilde;o Social')) {
                     
-                    // Specific mapping requested by user
                     const fieldMappings = {
                         'cnpj': ['CNPJ:'],
                         'razao_social': ['Razão Social:', 'Raz&atilde;o Social:'],
@@ -253,33 +263,24 @@ async function runScraping(filepath, processId) {
 
                     const extractField = (keys) => {
                         for (const key of keys) {
-                            // Find elements that contain the label key
-                            // We look for td, b, font tags that specifically START with the label
                             const element = $(`td, b, font`).filter((i, el) => {
                                 const text = $(el).text().trim();
                                 return text.startsWith(key) || text === key;
                             }).first();
 
                             if (element.length > 0) {
-                                // Strategy 1: The text is in the same element after the colon (e.g. <b>CNPJ: 123</b>)
                                 let text = element.text().trim();
                                 if (text.length > key.length) {
                                     return text.replace(key, '').trim();
                                 }
-
-                                // Strategy 2: The text is in the next sibling (e.g. <b>CNPJ:</b> 123)
                                 const nextSibling = element[0].nextSibling;
-                                if (nextSibling && nextSibling.nodeType === 3) { // Text node
+                                if (nextSibling && nextSibling.nodeType === 3) {
                                     return $(nextSibling).text().trim();
                                 }
-
-                                // Strategy 3: The text is in the next element (e.g. <td>CNPJ:</td><td>123</td>)
                                 const nextEl = element.next();
                                 if (nextEl.length > 0) {
                                     return nextEl.text().trim();
                                 }
-                                
-                                // Strategy 4: Parent's next sibling (Table structure)
                                 const parentTd = element.closest('td');
                                 if (parentTd.length > 0) {
                                     const nextTd = parentTd.next('td');
@@ -316,7 +317,6 @@ async function runScraping(filepath, processId) {
                         status: 'Sucesso'
                     };
                     
-                    // Final cleanup of values (remove extra HTML entities if any remained)
                     Object.keys(resultData).forEach(key => {
                         if (typeof resultData[key] === 'string') {
                             resultData[key] = decodeHTMLEntities(resultData[key]);
@@ -333,6 +333,9 @@ async function runScraping(filepath, processId) {
                 resultData.status = 'Erro: ' + err.message;
             }
 
+            // Double check cancellation before insert
+            if (activeScrapes.get(processId) === false) break;
+
             const cols = Object.keys(resultData).join(',');
             const vals = Object.values(resultData);
             const placeholders = vals.map(() => '?').join(',');
@@ -344,12 +347,18 @@ async function runScraping(filepath, processId) {
             await new Promise(r => setTimeout(r, delay));
         }
 
-        db.run('UPDATE consulta SET status = "completed", end_time = ? WHERE id = ?', [new Date().toISOString(), processId]);
+        if (activeScrapes.get(processId) === false) {
+             // If cancelled, just leave it (deletion handled by API)
+             console.log(`[Scraper] Finalizando thread cancelada ${processId}`);
+        } else {
+             db.run('UPDATE consulta SET status = "completed", end_time = ? WHERE id = ?', [new Date().toISOString(), processId]);
+        }
 
     } catch (error) {
         console.error('[Scraper] Erro Fatal:', error);
         db.run('UPDATE consulta SET status = "error" WHERE id = ?', [processId]);
     } finally {
+        activeScrapes.delete(processId);
         if (browser) await browser.close();
     }
 }
@@ -617,11 +626,29 @@ app.get('/progress/:id', (req, res) => {
     req.on('close', () => clearInterval(interval));
 });
 
+// Cleanup Orphaned Results
+app.post('/api/cleanup', (req, res) => {
+    db.run(`DELETE FROM resultado WHERE consulta_id NOT IN (SELECT id FROM consulta)`, (err) => {
+        if(err) return res.status(500).json({error: err.message});
+        res.json({success: true, message: "Dados órfãos removidos"});
+    });
+});
+
 app.delete('/api/imports/:id', (req, res) => {
     const id = req.params.id;
-    db.run('DELETE FROM resultado WHERE consulta_id = ?', [id], (err) => {
-        db.run('DELETE FROM consulta WHERE id = ?', [id], (err) => res.json({ success: true }));
-    });
+    
+    // Stop scraping if running
+    if (activeScrapes.has(id)) {
+        console.log(`[API] Solicitando parada do scraping ${id}`);
+        activeScrapes.set(id, false); // Signal stop
+    }
+
+    // Give it a moment to stop loop before deleting rows
+    setTimeout(() => {
+        db.run('DELETE FROM resultado WHERE consulta_id = ?', [id], (err) => {
+            db.run('DELETE FROM consulta WHERE id = ?', [id], (err) => res.json({ success: true }));
+        });
+    }, 500);
 });
 
 app.post('/api/imports/retry/:id', (req, res) => {

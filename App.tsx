@@ -425,6 +425,17 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); alert('Erro ao salvar configurações'); }
   }
 
+  const cleanupOrphanedData = async () => {
+      if(!confirm("Isso apagará empresas que não têm um arquivo de importação vinculado (Ex: uploads interrompidos). Continuar?")) return;
+      try {
+          const res = await fetch('/api/cleanup', { method: 'POST' });
+          if(res.ok) {
+              alert('Limpeza concluída!');
+              fetchCompanies();
+          }
+      } catch (e) { alert('Erro ao limpar'); }
+  }
+
   // --- API Calls ---
 
   const fetchFilters = async () => {
@@ -479,11 +490,14 @@ const App: React.FC = () => {
   };
 
   const deleteImport = async (id: string) => {
-      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista.')) return;
+      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
       try {
           await fetch(`/api/imports/${id}`, { method: 'DELETE' });
-          fetchImports();
-          fetchCompanies();
+          // Short delay to ensure scraping stopped and DB cleared
+          setTimeout(() => {
+              fetchImports();
+              fetchCompanies();
+          }, 1000);
       } catch(e) { alert('Erro ao deletar'); }
   };
 
@@ -1012,12 +1026,20 @@ const App: React.FC = () => {
                          <div className="space-y-4">
                              <div>
                                  <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
-                                 <input 
-                                    className="input-premium" 
-                                    placeholder="Ex: Omisso de EFD"
-                                    value={editingRule.motivoSituacao}
-                                    onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
-                                 />
+                                 <div className="relative">
+                                     <input 
+                                        list="reasons-list"
+                                        className="input-premium" 
+                                        placeholder="Selecione ou digite um motivo..."
+                                        value={editingRule.motivoSituacao}
+                                        onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
+                                     />
+                                     <datalist id="reasons-list">
+                                        {availableReasons.map((r: string, idx: number) => (
+                                            <option key={idx} value={r} />
+                                        ))}
+                                     </datalist>
+                                 </div>
                                  <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
                              </div>
                              
@@ -1140,6 +1162,19 @@ const App: React.FC = () => {
                                    <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
                                </label>
                            </div>
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
+                       <div className="flex justify-between items-center">
+                           <div>
+                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
+                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
+                           </div>
+                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
+                               <Trash2 size={18}/> Limpar Dados
+                           </button>
                        </div>
                    </div>
 
