@@ -138,6 +138,7 @@ async function runScraping(filepath, processId) {
                 '--disable-gpu',
                 '--no-first-run',
                 '--no-zygote',
+                '--disable-extensions',
                 '--window-size=1280,800'
             ],
             ignoreHTTPSErrors: true
@@ -309,7 +310,6 @@ const client = new Client({
   puppeteer: {
     headless: true,
     // Argumentos críticos para rodar em Docker sem crashar
-    // REMOVIDO --single-process pois causa crashes em versões recentes
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox', 
@@ -317,7 +317,8 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote', 
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-extensions'
     ],
   },
   // Correção para erro "Evaluation failed: t" em versões recentes
