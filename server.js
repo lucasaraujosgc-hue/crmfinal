@@ -29,6 +29,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const AUTH_DIR = path.join(DATA_DIR, 'whatsapp_auth');
 const DB_PATH = path.join(DATA_DIR, 'consultas.db');
+const AI_CONFIG_PATH = path.join(DATA_DIR, 'ai-config.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -36,6 +37,7 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 const upload = multer({ dest: UPLOADS_DIR });
 const db = new sqlite3.Database(DB_PATH);
 
+// Initialize DB
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS consulta (
     id TEXT PRIMARY KEY,
@@ -88,11 +90,49 @@ db.serialize(() => {
   )`);
 });
 
+// Load AI Config
+let aiConfig = {
+  model: 'gemini-2.5-flash',
+  persona: 'Você é um assistente útil.',
+  knowledgeRules: [], 
+  temperature: 0.7,
+  aiActive: true
+};
+
+if (fs.existsSync(AI_CONFIG_PATH)) {
+    try {
+        const savedConfig = JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf8'));
+        aiConfig = { ...aiConfig, ...savedConfig };
+    } catch (e) {
+        console.error("Erro ao carregar ai-config.json", e);
+    }
+} else {
+    // Save defaults
+    fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(aiConfig, null, 2));
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- SCRAPING LOGIC ---
+
+// Helper function to decode HTML entities
+function decodeHTMLEntities(text) {
+    if (!text) return '';
+    const entities = {
+        '&amp;': '&',
+        '&lt;': '<',
+        '&gt;': '>',
+        '&quot;': '"',
+        '&apos;': "'",
+        '&nbsp;': ' ',
+        '&atilde;': 'ã',
+        '&ccedil;': 'ç',
+        '&iacute;': 'í'
+    };
+    return text.replace(/&[a-z]+;/g, match => entities[match] || match);
+}
 
 async function runScraping(filepath, processId) {
     console.log(`[Scraper] Iniciando para arquivo: ${filepath}`);
@@ -130,7 +170,6 @@ async function runScraping(filepath, processId) {
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            // Argumentos robustos para Docker para evitar crashes
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -174,10 +213,8 @@ async function runScraping(filepath, processId) {
                 await page.evaluate((sel) => { document.querySelector(sel).value = '' }, inputSelector);
                 await page.type(inputSelector, ie, { delay: 100 });
                 
-                // Clica no botão específico name="B2"
                 const submitSelector = 'input[name="B2"]';
                 
-                // Estratégia de clique segura
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => console.log('Nav timeout ignored')),
                     page.click(submitSelector)
@@ -186,68 +223,106 @@ async function runScraping(filepath, processId) {
                 await page.waitForSelector('body', { timeout: 15000 });
                 const content = await page.content();
                 const $ = cheerio.load(content);
-                const textBody = $('body').text();
-                // Versão normalizada para regex
-                const textBodyNorm = textBody.replace(/\s+/g, ' ');
-
-                if (textBodyNorm.includes('Consulta Básica ao Cadastro do ICMS') || textBodyNorm.includes('Razão Social')) {
+                
+                // Check if page contains valid data
+                const pageText = $('body').text();
+                
+                if (pageText.includes('Consulta Básica ao Cadastro do ICMS') || pageText.includes('Razão Social') || pageText.includes('Raz&atilde;o Social')) {
                     
-                    // Regex helper para extrair campos que podem estar mal formatados no HTML
-                    const extractRegex = (label) => {
-                        const regex = new RegExp(`${label}\\s*[:]?\\s*([^:<]+)`, 'i');
-                        const match = textBodyNorm.match(regex);
-                        if (match && match[1]) {
-                            return match[1].replace(/&nbsp;/g, '').trim();
+                    // Specific mapping requested by user
+                    const fieldMappings = {
+                        'cnpj': ['CNPJ:'],
+                        'razao_social': ['Razão Social:', 'Raz&atilde;o Social:'],
+                        'nome_fantasia': ['Nome Fantasia:'],
+                        'unidade_fiscalizacao': ['Unidade de Fiscalização:', 'Unidade de Fiscaliza&ccedil;&atilde;o:'],
+                        'logradouro': ['Logradouro:'],
+                        'bairro_distrito': ['Bairro/Distrito:'],
+                        'municipio': ['Município:', 'Munic&iacute;pio:'],
+                        'uf': ['UF:'],
+                        'cep': ['CEP:'],
+                        'telefone': ['Telefone:'],
+                        'email': ['E-mail:'],
+                        'atividade_economica_principal': ['Atividade Econômica Principal:', 'Atividade Econ&ocirc;mica Principal:'],
+                        'condicao': ['Condição:', 'Condi&ccedil;&atilde;o:'],
+                        'forma_pagamento': ['Forma de pagamento:'],
+                        'situacao_cadastral': ['Situação Cadastral Vigente:', 'Situa&ccedil;&atilde;o Cadastral Vigente:'],
+                        'data_situacao_cadastral': ['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:'],
+                        'motivo_situacao_cadastral': ['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:'],
+                        'nome_contador': ['Nome:', 'Nome (Contador):']
+                    };
+
+                    const extractField = (keys) => {
+                        for (const key of keys) {
+                            // Find elements that contain the label key
+                            // We look for td, b, font tags that specifically START with the label
+                            const element = $(`td, b, font`).filter((i, el) => {
+                                const text = $(el).text().trim();
+                                return text.startsWith(key) || text === key;
+                            }).first();
+
+                            if (element.length > 0) {
+                                // Strategy 1: The text is in the same element after the colon (e.g. <b>CNPJ: 123</b>)
+                                let text = element.text().trim();
+                                if (text.length > key.length) {
+                                    return text.replace(key, '').trim();
+                                }
+
+                                // Strategy 2: The text is in the next sibling (e.g. <b>CNPJ:</b> 123)
+                                const nextSibling = element[0].nextSibling;
+                                if (nextSibling && nextSibling.nodeType === 3) { // Text node
+                                    return $(nextSibling).text().trim();
+                                }
+
+                                // Strategy 3: The text is in the next element (e.g. <td>CNPJ:</td><td>123</td>)
+                                const nextEl = element.next();
+                                if (nextEl.length > 0) {
+                                    return nextEl.text().trim();
+                                }
+                                
+                                // Strategy 4: Parent's next sibling (Table structure)
+                                const parentTd = element.closest('td');
+                                if (parentTd.length > 0) {
+                                    const nextTd = parentTd.next('td');
+                                    if (nextTd.length > 0) {
+                                        return nextTd.text().trim();
+                                    }
+                                }
+                            }
                         }
                         return null;
                     };
 
-                    // DOM helper
-                    const getByDom = (label) => {
-                         let val = null;
-                         $('b, td, font').each((_, el) => {
-                             if($(el).text().includes(label)) {
-                                 const next = el.nextSibling;
-                                 if(next && next.nodeType === 3) val = next.nodeValue;
-                                 else {
-                                     // Tenta pegar do pai se o label for parte do texto
-                                     const pText = $(el).parent().text();
-                                     if(pText.includes(label)) val = pText.split(label)[1];
-                                 }
-                             }
-                         });
-                         return val ? val.replace(/[:]/g, '').trim() : null;
+                    resultData = {
+                        consulta_id: processId,
+                        inscricao_estadual: extractField(['Inscrição Estadual:', 'Inscri&ccedil;&atilde;o Estadual:']) || ie,
+                        cnpj: extractField(fieldMappings.cnpj),
+                        razao_social: extractField(fieldMappings.razao_social),
+                        nome_fantasia: extractField(fieldMappings.nome_fantasia),
+                        unidade_fiscalizacao: extractField(fieldMappings.unidade_fiscalizacao),
+                        logradouro: extractField(fieldMappings.logradouro),
+                        bairro_distrito: extractField(fieldMappings.bairro_distrito),
+                        municipio: extractField(fieldMappings.municipio),
+                        uf: extractField(fieldMappings.uf),
+                        cep: extractField(fieldMappings.cep),
+                        telefone: extractField(fieldMappings.telefone),
+                        email: extractField(fieldMappings.email),
+                        atividade_economica_principal: extractField(fieldMappings.atividade_economica_principal),
+                        condicao: extractField(fieldMappings.condicao),
+                        forma_pagamento: extractField(fieldMappings.forma_pagamento),
+                        situacao_cadastral: extractField(fieldMappings.situacao_cadastral),
+                        data_situacao_cadastral: extractField(fieldMappings.data_situacao_cadastral),
+                        motivo_situacao_cadastral: extractField(fieldMappings.motivo_situacao_cadastral),
+                        nome_contador: extractField(fieldMappings.nome_contador),
+                        status: 'Sucesso'
                     };
+                    
+                    // Final cleanup of values (remove extra HTML entities if any remained)
+                    Object.keys(resultData).forEach(key => {
+                        if (typeof resultData[key] === 'string') {
+                            resultData[key] = decodeHTMLEntities(resultData[key]);
+                        }
+                    });
 
-                    const razao = getByDom('Razão Social') || extractRegex('Razão Social');
-
-                    if (razao) {
-                        resultData = {
-                            consulta_id: processId,
-                            inscricao_estadual: extractRegex('Inscrição Estadual') || ie,
-                            cnpj: extractRegex('CNPJ'),
-                            razao_social: razao,
-                            nome_fantasia: extractRegex('Nome Fantasia'),
-                            unidade_fiscalizacao: extractRegex('Unidade de Fiscalização'),
-                            logradouro: extractRegex('Logradouro'),
-                            bairro_distrito: extractRegex('Bairro/Distrito') || extractRegex('Bairro'),
-                            municipio: extractRegex('Município') || extractRegex('Municipio'), // Regex pega melhor
-                            uf: extractRegex('UF'),
-                            cep: extractRegex('CEP'),
-                            telefone: extractRegex('Telefone'),
-                            email: extractRegex('E-mail'),
-                            atividade_economica_principal: extractRegex('Atividade Econômica'),
-                            condicao: extractRegex('Condição'),
-                            forma_pagamento: extractRegex('Forma de pagamento'),
-                            situacao_cadastral: extractRegex('Situação Cadastral Vigente') || extractRegex('Situação Cadastral'),
-                            data_situacao_cadastral: extractRegex('Data desta Situação Cadastral'),
-                            motivo_situacao_cadastral: extractRegex('Motivo desta Situação Cadastral') || extractRegex('Motivo'),
-                            nome_contador: extractRegex('Nome') || extractRegex('Contador'), 
-                            status: 'Sucesso'
-                        };
-                    } else {
-                         resultData.status = 'Erro: Dados vazios';
-                    }
                 } else {
                     const errorMsg = $('font[color="#FF0000"]').text().trim() || 'IE não encontrada/Erro';
                     resultData.status = 'Erro: ' + errorMsg.substring(0, 50);
@@ -309,7 +384,6 @@ const client = new Client({
   authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
   puppeteer: {
     headless: true,
-    // Argumentos críticos para rodar em Docker sem crashar
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox', 
@@ -321,7 +395,6 @@ const client = new Client({
       '--disable-extensions'
     ],
   },
-  // Correção para erro "Evaluation failed: t" em versões recentes
   webVersionCache: {
     type: "remote",
     remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
@@ -341,14 +414,6 @@ client.on('ready', () => {
   clientReady = true;
   qrCodeData = null;
 });
-
-let aiConfig = {
-  model: 'gemini-2.5-flash',
-  persona: 'Você é um assistente útil.',
-  knowledgeRules: [], 
-  temperature: 0.7,
-  aiActive: true
-};
 
 // --- IA MESSAGE HANDLING ---
 client.on('message', async (msg) => {
@@ -383,17 +448,21 @@ client.on('message', async (msg) => {
                 contextData += `\n\n--- DADOS DA EMPRESA (CLIENTE) ---\n`;
                 contextData += `Razão Social: ${company.razao_social}\nIE: ${company.inscricao_estadual}\nStatus: ${company.situacao_cadastral}\nMotivo: ${company.motivo_situacao_cadastral}\nMunicípio: ${company.municipio}\n`;
                 
+                // Enhanced matching logic for Knowledge Base
                 if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
                     const companyReason = company.motivo_situacao_cadastral.toLowerCase().trim();
                     matchedRule = aiConfig.knowledgeRules.find(rule => {
                         if (!rule.isActive || !rule.motivoSituacao) return false;
-                        return companyReason.includes(rule.motivoSituacao.toLowerCase().trim()); 
+                        const ruleReason = rule.motivoSituacao.toLowerCase().trim();
+                        return companyReason.includes(ruleReason) || ruleReason.includes(companyReason);
                     });
 
                     if (matchedRule) {
-                        contextData += `\n--- DIAGNÓSTICO (SISTEMA) ---\nProblema: "${matchedRule.motivoSituacao}".\nINSTRUÇÕES:\n`;
+                        contextData += `\n--- DIAGNÓSTICO E INSTRUÇÕES (Base de Conhecimento) ---\n`;
+                        contextData += `O cliente possui o problema: "${matchedRule.motivoSituacao}".\n`;
+                        contextData += `Siga estas instruções:\n`;
                         if (matchedRule.instructions) {
-                            matchedRule.instructions.forEach(inst => contextData += `[${inst.title}]: ${inst.content}\n`);
+                            matchedRule.instructions.forEach(inst => contextData += `- [${inst.title}]: ${inst.content}\n`);
                         }
                     }
                 }
@@ -408,7 +477,6 @@ client.on('message', async (msg) => {
                 try {
                     const media = await msg.downloadMedia();
                     if (media) {
-                         // Gemini aceita áudio e imagem como inlineData
                          promptParts.push({
                              inlineData: { mimeType: media.mimetype, data: media.data }
                          });
@@ -459,11 +527,28 @@ process.on('SIGINT', async () => {
 
 // --- API ROUTES ---
 
+// Update AI Config (Persist to file)
 app.post('/api/config/ai-rules', (req, res) => {
-  const { rules, persona } = req.body;
-  if (rules) aiConfig.knowledgeRules = rules;
-  if (persona) aiConfig.persona = persona;
-  res.json({ success: true });
+  const { rules, persona, temperature, model, aiActive } = req.body;
+  
+  if (rules !== undefined) aiConfig.knowledgeRules = rules;
+  if (persona !== undefined) aiConfig.persona = persona;
+  if (temperature !== undefined) aiConfig.temperature = temperature;
+  if (model !== undefined) aiConfig.model = model;
+  if (aiActive !== undefined) aiConfig.aiActive = aiActive;
+
+  try {
+      fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(aiConfig, null, 2));
+      res.json({ success: true });
+  } catch (e) {
+      console.error("Erro ao salvar config", e);
+      res.status(500).json({ error: "Falha ao salvar configuração" });
+  }
+});
+
+// Get AI Config
+app.get('/api/config', (req, res) => {
+    res.json(aiConfig);
 });
 
 app.get('/api/unique-filters', (req, res) => {
@@ -553,6 +638,20 @@ app.get('/api/campaigns', (req, res) => {
                 FROM resultado WHERE campaign_id = ?`, [c.id], (e, stats) => resolve({ ...c, stats }));
         }));
         Promise.all(promises).then(data => res.json(data));
+    });
+});
+
+// Delete Campaign Endpoint
+app.delete('/api/campaigns/:id', (req, res) => {
+    const id = req.params.id;
+    // Set leads back to pending/no-campaign
+    db.run('UPDATE resultado SET campaign_id = NULL, campaign_status = "pending" WHERE campaign_id = ?', [id], (err) => {
+        if(err) return res.status(500).json({error: "Failed to unlink leads"});
+        // Delete campaign
+        db.run('DELETE FROM campaign WHERE id = ?', [id], (err) => {
+            if(err) return res.status(500).json({error: "Failed to delete campaign"});
+            res.json({success: true});
+        });
     });
 });
 

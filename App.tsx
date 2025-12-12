@@ -3,13 +3,14 @@ import {
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
-  BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle
+  BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
+import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
+import { v4 as uuidv4 } from 'uuid';
 
 // --- Hooks ---
 
@@ -321,10 +322,11 @@ const App: React.FC = () => {
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
     model: 'gemini-2.5-flash',
     persona: DEFAULT_AI_PERSONA,
-    knowledgeRules: DEFAULT_KNOWLEDGE_RULES,
+    knowledgeRules: [],
     temperature: 0.7,
     aiActive: true
   });
+  const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
 
   // WhatsApp State
   const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
@@ -339,6 +341,7 @@ const App: React.FC = () => {
     fetchImports();
     fetchFilters();
     fetchCampaigns();
+    fetchAiConfig();
   }, []);
 
   useEffect(() => {
@@ -395,13 +398,32 @@ const App: React.FC = () => {
     }
   }, currentProcessId ? 1000 : null);
 
-  useEffect(() => {
-    fetch('/api/config/ai-rules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rules: aiConfig.knowledgeRules, persona: aiConfig.persona })
-    }).catch(console.error);
-  }, [aiConfig.knowledgeRules, aiConfig.persona]);
+  const fetchAiConfig = async () => {
+      try {
+          const res = await fetch('/api/config');
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data);
+          }
+      } catch (e) { console.error(e); }
+  }
+
+  const saveAiConfig = async (newConfig: AIConfig) => {
+      try {
+          await fetch('/api/config/ai-rules', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  rules: newConfig.knowledgeRules,
+                  persona: newConfig.persona,
+                  temperature: newConfig.temperature,
+                  model: newConfig.model,
+                  aiActive: newConfig.aiActive
+              })
+          });
+          setAiConfig(newConfig);
+      } catch (e) { console.error(e); alert('Erro ao salvar configurações'); }
+  }
 
   // --- API Calls ---
 
@@ -422,6 +444,19 @@ const App: React.FC = () => {
           if (res.ok) setCampaigns(await res.json());
       } catch (e) { console.error(e); }
   };
+
+  const deleteCampaign = async (id: string) => {
+      if(!confirm("Tem certeza que deseja excluir esta campanha? Os leads voltarão para o status pendente.")) return;
+      try {
+          const res = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+          if(res.ok) {
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert("Erro ao excluir campanha");
+          }
+      } catch (e) { alert("Erro de conexão"); }
+  }
 
   const fetchCompanies = async () => {
     try {
@@ -835,7 +870,12 @@ const App: React.FC = () => {
                        </div>
                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                            {campaigns.map(c => (
-                               <div key={c.id} className="card-premium p-6 group">
+                               <div key={c.id} className="card-premium p-6 group relative">
+                                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                       <button onClick={() => deleteCampaign(c.id)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg">
+                                           <Trash2 size={18}/>
+                                       </button>
+                                   </div>
                                    <div className="flex justify-between items-start mb-4">
                                        <div className="p-3 bg-brand-50 text-brand-600 rounded-xl">
                                            <Rocket size={24}/>
@@ -955,10 +995,160 @@ const App: React.FC = () => {
           )}
 
            {activeTab === 'knowledge' && (
-              <div className="max-w-4xl mx-auto">
-                 {/* Simplified for brevity - Assume Knowledge Base UI remains similar but uses editingRule state */}
-                 <div className="card-premium p-8 text-center"><p className="text-slate-500">Gestão da Base de Conhecimento (Utilize as configurações iniciais ou edite via API)</p></div>
+              <div className="max-w-4xl mx-auto space-y-6">
+                 <div className="flex justify-between items-center">
+                     <div>
+                        <h2 className="text-2xl font-bold text-slate-800">Base de Conhecimento</h2>
+                        <p className="text-slate-500">Vincule motivos da SEFAZ a instruções para a IA</p>
+                     </div>
+                     <button onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })} className="btn-primary">
+                         <Plus size={18} /> Nova Regra
+                     </button>
+                 </div>
+
+                 {editingRule ? (
+                     <div className="card-premium p-8 animate-fade-in">
+                         <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
+                         <div className="space-y-4">
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
+                                 <input 
+                                    className="input-premium" 
+                                    placeholder="Ex: Omisso de EFD"
+                                    value={editingRule.motivoSituacao}
+                                    onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
+                                 />
+                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
+                             </div>
+                             
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-2">Instruções para a IA</label>
+                                 {editingRule.instructions.map((inst, idx) => (
+                                     <div key={idx} className="flex gap-2 mb-2">
+                                         <input 
+                                            className="input-premium flex-1" 
+                                            value={inst.content} 
+                                            onChange={e => {
+                                                const newInsts = [...editingRule.instructions];
+                                                newInsts[idx].content = e.target.value;
+                                                setEditingRule({...editingRule, instructions: newInsts});
+                                            }}
+                                            placeholder="Instrução detalhada..."
+                                         />
+                                         <button onClick={() => {
+                                             const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                             setEditingRule({...editingRule, instructions: newInsts});
+                                         }} className="p-3 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                     </div>
+                                 ))}
+                                 <button onClick={() => {
+                                     setEditingRule({
+                                         ...editingRule, 
+                                         instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]
+                                     });
+                                 }} className="text-brand-600 text-sm font-semibold hover:underline">+ Adicionar Instrução</button>
+                             </div>
+
+                             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                                 <button onClick={() => setEditingRule(null)} className="btn-secondary">Cancelar</button>
+                                 <button onClick={() => {
+                                     if(!editingRule.motivoSituacao) return alert("Preencha o motivo");
+                                     const newRules = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id);
+                                     newRules.push(editingRule);
+                                     saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                     setEditingRule(null);
+                                 }} className="btn-primary">Salvar Regra</button>
+                             </div>
+                         </div>
+                     </div>
+                 ) : (
+                     <div className="grid gap-4">
+                         {aiConfig.knowledgeRules.map(rule => (
+                             <div key={rule.id} className="card-premium p-6 flex justify-between items-start">
+                                 <div>
+                                     <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                         <BookOpen size={18} className="text-brand-500"/>
+                                         {rule.motivoSituacao}
+                                     </h4>
+                                     <ul className="mt-2 space-y-1">
+                                         {rule.instructions.map((inst, i) => (
+                                             <li key={i} className="text-sm text-slate-600 list-disc list-inside">{inst.content}</li>
+                                         ))}
+                                     </ul>
+                                 </div>
+                                 <div className="flex gap-2">
+                                     <button onClick={() => setEditingRule(rule)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit size={18}/></button>
+                                     <button onClick={() => {
+                                         if(confirm("Excluir regra?")) {
+                                             const newRules = aiConfig.knowledgeRules.filter(r => r.id !== rule.id);
+                                             saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                         }
+                                     }} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                 </div>
+                             </div>
+                         ))}
+                         {aiConfig.knowledgeRules.length === 0 && (
+                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
+                             </div>
+                         )}
+                     </div>
+                 )}
               </div>
+           )}
+
+           {activeTab === 'settings' && (
+               <div className="max-w-3xl mx-auto space-y-6">
+                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
+                   
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <div className="space-y-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
+                               <textarea 
+                                  className="input-premium h-32"
+                                  value={aiConfig.persona}
+                                  onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
+                               />
+                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
+                           </div>
+                           
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
+                               <input 
+                                  type="range" min="0" max="1" step="0.1" 
+                                  className="w-full"
+                                  value={aiConfig.temperature}
+                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
+                               />
+                               <div className="flex justify-between text-xs text-slate-400">
+                                   <span>Preciso (0.0)</span>
+                                   <span>Criativo (1.0)</span>
+                               </div>
+                           </div>
+
+                           <div>
+                               <label className="flex items-center gap-2 cursor-pointer">
+                                   <input 
+                                      type="checkbox" 
+                                      checked={aiConfig.aiActive}
+                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
+                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
+                                   />
+                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
+                               </label>
+                           </div>
+                       </div>
+                   </div>
+
+                   <div className="flex justify-end">
+                       <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary flex items-center gap-2">
+                           <Save size={18}/> Salvar Alterações
+                       </button>
+                   </div>
+               </div>
            )}
 
         </div>
