@@ -188,7 +188,7 @@ const StatusBadge = ({ status }: { status: string }) => {
     )
 }
 
-const KanbanCard = ({ company, onClick }: { company: CompanyResult, onClick: () => void }) => (
+const KanbanCard: React.FC<{ company: CompanyResult, onClick: () => void }> = ({ company, onClick }) => (
     <div onClick={onClick} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-brand-300 group">
         <div className="flex justify-between items-start mb-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase">{company.inscricaoEstadual}</span>

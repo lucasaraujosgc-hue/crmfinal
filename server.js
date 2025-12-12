@@ -138,7 +138,6 @@ async function runScraping(filepath, processId) {
                 '--disable-gpu',
                 '--no-first-run',
                 '--no-zygote',
-                // '--single-process', // REMOVIDO: Causa instabilidade
                 '--window-size=1280,800'
             ],
             ignoreHTTPSErrors: true
