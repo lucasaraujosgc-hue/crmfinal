@@ -28,14 +28,22 @@ const port = 3000;
 const activeScrapes = new Map(); // Stores processId -> boolean (true = running, false = abort)
 
 // --- PERSISTENCE SETUP ---
-const DATA_DIR = path.join(__dirname, 'data');
+// Allow overriding via env var for Docker/Easypanel flexibility
+const DATA_DIR = process.env.DATA_PATH || path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const AUTH_DIR = path.join(DATA_DIR, 'whatsapp_auth');
 const DB_PATH = path.join(DATA_DIR, 'consultas.db');
 const AI_CONFIG_PATH = path.join(DATA_DIR, 'ai-config.json');
 
+console.log('--- SYSTEM PATHS ---');
+console.log(`Root: ${__dirname}`);
+console.log(`Data: ${DATA_DIR}`);
+console.log(`Auth: ${AUTH_DIR}`);
+console.log('--------------------');
+
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true }); // Ensure auth dir exists with correct perms
 
 const upload = multer({ dest: UPLOADS_DIR });
 const db = new sqlite3.Database(DB_PATH);
@@ -273,6 +281,14 @@ async function runScraping(filepath, processId) {
                         'nome_contador': ['Nome:', 'Nome (Contador):']
                     };
 
+                    const cleanValue = (val) => {
+                        if (!val) return '';
+                        // Remove common next-field leaks like "UF:" if captured
+                        if (val.includes('UF:')) return val.split('UF:')[0].trim();
+                        if (val.includes('CEP:')) return val.split('CEP:')[0].trim();
+                        return val;
+                    };
+
                     const extractField = (keys) => {
                         for (const key of keys) {
                             const element = $(`b, td, font`).filter((i, el) => {
@@ -282,49 +298,59 @@ async function runScraping(filepath, processId) {
                             }).first();
 
                             if (element.length > 0) {
+                                let foundVal = null;
+
                                 // CASE 1: Next Sibling (Text Node)
                                 const nextSibling = element[0].nextSibling;
                                 if (nextSibling && nextSibling.nodeType === 3) {
                                     const val = $(nextSibling).text().trim();
-                                    if(val) return val;
+                                    if(val) foundVal = val;
                                 }
 
                                 // CASE 1.5: Parent Text Content (Fix for <td><b>Label:</b> Value</td>)
-                                const parent = element.parent();
-                                if (parent.length > 0) {
-                                    const parentText = parent.text().trim();
-                                    const labelText = element.text().trim();
-                                    
-                                    if (parentText.startsWith(labelText)) {
-                                        const potentialVal = parentText.substring(labelText.length).trim();
-                                        if (potentialVal.length > 0) {
-                                            return potentialVal;
+                                if (!foundVal) {
+                                    const parent = element.parent();
+                                    if (parent.length > 0) {
+                                        const parentText = parent.text().trim();
+                                        const labelText = element.text().trim();
+                                        
+                                        if (parentText.startsWith(labelText)) {
+                                            const potentialVal = parentText.substring(labelText.length).trim();
+                                            if (potentialVal.length > 0) foundVal = potentialVal;
                                         }
                                     }
                                 }
 
                                 // CASE 2: Value is in the Next Element (TD)
-                                const nextTd = element.closest('td').next('td');
-                                if (nextTd.length > 0) {
-                                    const val = nextTd.text().trim();
-                                    // VALIDATION: Ensure the value doesn't look like another field label (e.g., "UF:")
-                                    const isAnotherLabel = val.includes(':') && val.length < 20; 
-                                    if(val && !isAnotherLabel) return val;
+                                if (!foundVal) {
+                                    const nextTd = element.closest('td').next('td');
+                                    if (nextTd.length > 0) {
+                                        const val = nextTd.text().trim();
+                                        // VALIDATION: Ensure the value doesn't look like another field label
+                                        const isAnotherLabel = val.includes(':') && val.length < 20; 
+                                        if(val && !isAnotherLabel) foundVal = val;
+                                    }
                                 }
 
                                 // CASE 3: Value is in the Next Row (TR)
-                                const nextTr = element.closest('tr').next('tr');
-                                if (nextTr.length > 0) {
-                                    const val = nextTr.find('td').first().text().trim();
-                                    if(val) return val;
+                                if (!foundVal) {
+                                    const nextTr = element.closest('tr').next('tr');
+                                    if (nextTr.length > 0) {
+                                        const val = nextTr.find('td').first().text().trim();
+                                        if(val) foundVal = val;
+                                    }
                                 }
                                 
                                 // CASE 4: Value inside element (fallback)
-                                const fullText = element.text().trim();
-                                const labelText = decodeHTMLEntities(key);
-                                if (fullText.length > labelText.length) {
-                                    return fullText.replace(labelText, '').trim();
+                                if (!foundVal) {
+                                    const fullText = element.text().trim();
+                                    const labelText = decodeHTMLEntities(key);
+                                    if (fullText.length > labelText.length) {
+                                        foundVal = fullText.replace(labelText, '').trim();
+                                    }
                                 }
+
+                                if (foundVal) return cleanValue(foundVal);
                             }
                         }
                         return null;
