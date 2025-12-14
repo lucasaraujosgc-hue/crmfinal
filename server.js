@@ -156,6 +156,33 @@ function decodeHTMLEntities(text) {
     return text.replace(/&[a-z]+;/g, match => entities[match] || match);
 }
 
+// Helper to remove labels from values (e.g. "Razão Social: EMPRESA X" -> "EMPRESA X")
+function cleanValue(val) {
+    if (!val) return '';
+    val = val.replace(/&nbsp;/g, ' ').replace(/\u00a0/g, ' ').trim();
+    
+    // Lista de rótulos comuns para remover do início da string
+    const labelsToRemove = [
+        'Razão Social:', 'Raz&atilde;o Social:', 'Nome Fantasia:', 'Logradouro:',
+        'Bairro/Distrito:', 'Município:', 'Munic&iacute;pio:', 'UF:', 'CEP:',
+        'Telefone:', 'E-mail:', 'Situação Cadastral Vigente:', 'Data desta Situação Cadastral:',
+        'Motivo desta Situação Cadastral:', 'Inscrição Estadual:', 'CNPJ:'
+    ];
+
+    for (const label of labelsToRemove) {
+        // Remove label at start (case insensitive)
+        const regex = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'i');
+        val = val.replace(regex, '');
+    }
+
+    // Stop capturing if we hit the next field label (common issue)
+    if (val.includes('UF:')) val = val.split('UF:')[0];
+    if (val.includes('CEP:')) val = val.split('CEP:')[0];
+    if (val.includes('Data desta')) val = val.split('Data desta')[0];
+
+    return val.trim();
+}
+
 async function runScraping(filepath, processId) {
     console.log(`[Scraper] Iniciando para arquivo: ${filepath}`);
     activeScrapes.set(processId, true); // Mark as active
@@ -212,7 +239,6 @@ async function runScraping(filepath, processId) {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
         for (let i = 0; i < ieList.length; i++) {
-            // Check cancellation signal
             if (activeScrapes.get(processId) === false) {
                 console.log(`[Scraper] Processo ${processId} cancelado pelo usuário.`);
                 break;
@@ -239,151 +265,75 @@ async function runScraping(filepath, processId) {
 
                 const inputSelector = 'input[name="IE"]';
                 await page.waitForSelector(inputSelector, { timeout: 15000 });
-                
-                // Limpa e digita
                 await page.evaluate((sel) => { document.querySelector(sel).value = '' }, inputSelector);
                 await page.type(inputSelector, ie, { delay: 100 });
                 
                 const submitSelector = 'input[name="B2"]';
-                
                 await Promise.all([
                     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => console.log('Nav timeout ignored')),
                     page.click(submitSelector)
                 ]);
 
-                // Espera pelo corpo ou algum elemento chave
                 await page.waitForSelector('body', { timeout: 15000 });
                 const content = await page.content();
                 const $ = cheerio.load(content);
-                
-                const pageText = $('body').text();
+                const pageText = $('body').text().replace(/\s+/g, ' '); // Normalize spaces for regex search
                 
                 if (pageText.includes('Consulta Básica ao Cadastro do ICMS') || pageText.includes('Razão Social') || pageText.includes('Raz&atilde;o Social')) {
                     
-                    const fieldMappings = {
-                        'cnpj': ['CNPJ:'],
-                        'razao_social': ['Razão Social:', 'Raz&atilde;o Social:'],
-                        'nome_fantasia': ['Nome Fantasia:'],
-                        'unidade_fiscalizacao': ['Unidade de Fiscalização:', 'Unidade de Fiscaliza&ccedil;&atilde;o:'],
-                        'logradouro': ['Logradouro:'],
-                        'bairro_distrito': ['Bairro/Distrito:'],
-                        'municipio': ['Município:', 'Munic&iacute;pio:'],
-                        'uf': ['UF:'],
-                        'cep': ['CEP:'],
-                        'telefone': ['Telefone:'],
-                        'email': ['E-mail:'],
-                        'atividade_economica_principal': ['Atividade Econômica Principal:', 'Atividade Econ&ocirc;mica Principal:'],
-                        'condicao': ['Condição:', 'Condi&ccedil;&atilde;o:'],
-                        'forma_pagamento': ['Forma de pagamento:'],
-                        'situacao_cadastral': ['Situação Cadastral Vigente:', 'Situa&ccedil;&atilde;o Cadastral Vigente:'],
-                        'data_situacao_cadastral': ['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:'],
-                        'motivo_situacao_cadastral': ['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:'],
-                        'nome_contador': ['Nome:', 'Nome (Contador):']
-                    };
-
-                    const cleanValue = (val) => {
-                        if (!val) return '';
-                        // Remove common next-field leaks like "UF:" if captured
-                        if (val.includes('UF:')) return val.split('UF:')[0].trim();
-                        if (val.includes('CEP:')) return val.split('CEP:')[0].trim();
-                        return val;
-                    };
-
-                    const extractField = (keys) => {
-                        for (const key of keys) {
-                            const element = $(`b, td, font`).filter((i, el) => {
-                                const text = $(el).text().trim();
-                                const cleanKey = key.replace(/&[a-z]+;/g, ''); 
-                                return text.startsWith(key) || text.startsWith(decodeHTMLEntities(key));
-                            }).first();
-
-                            if (element.length > 0) {
-                                let foundVal = null;
-
-                                // CASE 1: Next Sibling (Text Node)
-                                const nextSibling = element[0].nextSibling;
-                                if (nextSibling && nextSibling.nodeType === 3) {
-                                    const val = $(nextSibling).text().trim();
-                                    if(val) foundVal = val;
-                                }
-
-                                // CASE 1.5: Parent Text Content (Fix for <td><b>Label:</b> Value</td>)
-                                if (!foundVal) {
-                                    const parent = element.parent();
-                                    if (parent.length > 0) {
-                                        const parentText = parent.text().trim();
-                                        const labelText = element.text().trim();
-                                        
-                                        if (parentText.startsWith(labelText)) {
-                                            const potentialVal = parentText.substring(labelText.length).trim();
-                                            if (potentialVal.length > 0) foundVal = potentialVal;
-                                        }
-                                    }
-                                }
-
-                                // CASE 2: Value is in the Next Element (TD)
-                                if (!foundVal) {
-                                    const nextTd = element.closest('td').next('td');
-                                    if (nextTd.length > 0) {
-                                        const val = nextTd.text().trim();
-                                        // VALIDATION: Ensure the value doesn't look like another field label
-                                        const isAnotherLabel = val.includes(':') && val.length < 20; 
-                                        if(val && !isAnotherLabel) foundVal = val;
-                                    }
-                                }
-
-                                // CASE 3: Value is in the Next Row (TR)
-                                if (!foundVal) {
-                                    const nextTr = element.closest('tr').next('tr');
-                                    if (nextTr.length > 0) {
-                                        const val = nextTr.find('td').first().text().trim();
-                                        if(val) foundVal = val;
-                                    }
-                                }
-                                
-                                // CASE 4: Value inside element (fallback)
-                                if (!foundVal) {
-                                    const fullText = element.text().trim();
-                                    const labelText = decodeHTMLEntities(key);
-                                    if (fullText.length > labelText.length) {
-                                        foundVal = fullText.replace(labelText, '').trim();
-                                    }
-                                }
-
-                                if (foundVal) return cleanValue(foundVal);
-                            }
+                    // DOM Based Extraction (Primary)
+                    const extractDOM = (key) => {
+                        const el = $(`b:contains("${key}"), td:contains("${key}"), font:contains("${key}")`).last();
+                        if (el.length) {
+                             // Try Next Sibling Text
+                             if (el[0].nextSibling && el[0].nextSibling.nodeType === 3) {
+                                 return $(el[0].nextSibling).text();
+                             }
+                             // Try Parent Text (if label and value are in same node)
+                             const parentText = el.parent().text();
+                             if (parentText.includes(key)) {
+                                 return parentText.split(key)[1];
+                             }
+                             // Try Next TD
+                             const nextTd = el.closest('td').next('td');
+                             if (nextTd.length) return nextTd.text();
                         }
-                        return null;
+                        return '';
                     };
 
-                    resultData = {
-                        consulta_id: processId,
-                        inscricao_estadual: extractField(['Inscrição Estadual:', 'Inscri&ccedil;&atilde;o Estadual:']) || ie,
-                        cnpj: extractField(fieldMappings.cnpj),
-                        razao_social: extractField(fieldMappings.razao_social),
-                        nome_fantasia: extractField(fieldMappings.nome_fantasia),
-                        unidade_fiscalizacao: extractField(fieldMappings.unidade_fiscalizacao),
-                        logradouro: extractField(fieldMappings.logradouro),
-                        bairro_distrito: extractField(fieldMappings.bairro_distrito),
-                        municipio: extractField(fieldMappings.municipio),
-                        uf: extractField(fieldMappings.uf),
-                        cep: extractField(fieldMappings.cep),
-                        telefone: extractField(fieldMappings.telefone),
-                        email: extractField(fieldMappings.email),
-                        atividade_economica_principal: extractField(fieldMappings.atividade_economica_principal),
-                        condicao: extractField(fieldMappings.condicao),
-                        forma_pagamento: extractField(fieldMappings.forma_pagamento),
-                        situacao_cadastral: extractField(fieldMappings.situacao_cadastral),
-                        data_situacao_cadastral: extractField(fieldMappings.data_situacao_cadastral),
-                        motivo_situacao_cadastral: extractField(fieldMappings.motivo_situacao_cadastral),
-                        nome_contador: extractField(fieldMappings.nome_contador),
-                        status: 'Sucesso'
+                    // Regex Based Extraction (Fallback & Specific Fields)
+                    // These regexes run on the full normalized body text
+                    const regexExtract = (regex) => {
+                        const m = pageText.match(regex);
+                        return m ? m[1].trim() : '';
                     };
+
+                    resultData.razao_social = cleanValue(extractDOM('Razão Social:') || regexExtract(/Razão Social:\s*(.*?)(?=\s*Nome Fantasia|Logradouro|Unidade)/i));
+                    resultData.nome_fantasia = cleanValue(extractDOM('Nome Fantasia:') || regexExtract(/Nome Fantasia:\s*(.*?)(?=\s*Unidade de Fiscalização|Logradouro)/i));
+                    resultData.cnpj = cleanValue(extractDOM('CNPJ:') || regexExtract(/CNPJ:\s*([\d./-]+)/));
                     
+                    // Municipality fix: Use Regex on full text
+                    resultData.municipio = regexExtract(/Município:\s*([A-Z\sÀ-Ú]+?)(?=\s*UF:)/i);
+                    resultData.uf = regexExtract(/UF:\s*([A-Z]{2})/i);
+                    
+                    resultData.logradouro = cleanValue(extractDOM('Logradouro:'));
+                    resultData.bairro_distrito = cleanValue(extractDOM('Bairro/Distrito:'));
+                    resultData.cep = cleanValue(extractDOM('CEP:'));
+                    resultData.telefone = cleanValue(extractDOM('Telefone:'));
+                    
+                    // Situation fix: Ensure we don't grab the date label
+                    resultData.situacao_cadastral = regexExtract(/Situação Cadastral Vigente:\s*(.*?)(?=\s*Data desta)/i);
+                    resultData.data_situacao_cadastral = regexExtract(/Data desta Situação Cadastral:\s*(\d{2}\/\d{2}\/\d{4})/i);
+                    resultData.motivo_situacao_cadastral = cleanValue(extractDOM('Motivo desta Situação Cadastral:'));
+
+                    resultData.nome_contador = cleanValue(extractDOM('Nome (Contador):') || extractDOM('Nome:'));
+
+                    resultData.status = 'Sucesso';
+
+                    // Final cleanup loop
                     Object.keys(resultData).forEach(key => {
                         if (typeof resultData[key] === 'string') {
-                            let val = resultData[key].replace(/\u00a0/g, ' '); 
-                            resultData[key] = decodeHTMLEntities(val).trim();
+                            resultData[key] = cleanValue(resultData[key]);
                         }
                     });
 
@@ -406,8 +356,7 @@ async function runScraping(filepath, processId) {
             db.run(`INSERT INTO resultado (${cols}) VALUES (${placeholders})`, vals);
             db.run('UPDATE consulta SET processed = ? WHERE id = ?', [i + 1, processId]);
             
-            const delay = Math.floor(Math.random() * 2000) + 1000;
-            await new Promise(r => setTimeout(r, delay));
+            await new Promise(r => setTimeout(r, 1500));
         }
 
         if (activeScrapes.get(processId) === false) {
@@ -655,9 +604,11 @@ app.get('/get-all-results', (req, res) => {
         inscricaoEstadual: r.inscricao_estadual,
         cnpj: r.cnpj,
         razaoSocial: r.razao_social,
+        nomeFantasia: r.nome_fantasia,
         municipio: r.municipio,
         telefone: r.telefone,
         situacaoCadastral: r.situacao_cadastral,
+        dataSituacaoCadastral: r.data_situacao_cadastral,
         motivoSituacao: r.motivo_situacao_cadastral,
         nomeContador: r.nome_contador,
         status: r.status,

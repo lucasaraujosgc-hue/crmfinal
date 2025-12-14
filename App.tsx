@@ -139,18 +139,27 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                   </td>
               )}
               <td className="px-6 py-4">
-                <div className="flex items-center gap-2">
-                    <div>
-                        <p className="font-semibold text-slate-900">{company.razaoSocial || 'Nome Indisponível'}</p>
-                        <p className="text-xs text-slate-500">{company.inscricaoEstadual} | {company.cnpj}</p>
+                <div className="flex flex-col gap-1">
+                    <p className="font-bold text-slate-900 text-base">{company.razaoSocial || 'Razão Social N/D'}</p>
+                    {company.nomeFantasia && (
+                         <p className="text-sm text-slate-600">{company.nomeFantasia}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 mt-1">
+                        <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">CNPJ: {company.cnpj}</span>
+                        <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">IE: {company.inscricaoEstadual}</span>
                     </div>
+                    {company.dataSituacaoCadastral && (
+                        <p className="text-[10px] text-rose-600 font-bold mt-1">
+                            📅 {company.dataSituacaoCadastral}
+                        </p>
+                    )}
                 </div>
               </td>
               <td className="px-6 py-4">
                 <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
-                  company.situacaoCadastral === 'ATIVA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                  company.situacaoCadastral?.toUpperCase().includes('ATIVA') ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                 }`}>
-                  {company.situacaoCadastral}
+                  {company.situacaoCadastral || 'Desconhecida'}
                 </span>
               </td>
               <td className="px-6 py-4">
@@ -172,7 +181,7 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
               <td className="px-6 py-4 text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
                   {company.motivoSituacao || 'N/D'}
               </td>
-              <td className="px-6 py-4">{company.municipio}</td>
+              <td className="px-6 py-4">{company.municipio || '-'}</td>
             </tr>
           ))}
         </tbody>

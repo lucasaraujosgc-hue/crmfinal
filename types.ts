@@ -25,19 +25,21 @@ export interface CompanyResult {
   inscricaoEstadual: string;
   cnpj: string;
   razaoSocial: string;
+  nomeFantasia?: string; // Adicionado
   municipio: string;
   telefone: string | null;
   situacaoCadastral: string;
+  dataSituacaoCadastral?: string; // Adicionado
   motivoSituacao: string;
   nomeContador: string | null;
   status: Status;
   
   // Campaign Fields
-  campaignStatus: string; // Using string to allow DB values easily
+  campaignStatus: string; 
   lastContacted?: string;
   lastMessageSent?: string;
   aiAnalysis?: string;
-  aiActive?: boolean; // New field for per-contact AI toggle
+  aiActive?: boolean; 
 }
 
 export interface ProcessingStats {
