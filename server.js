@@ -299,7 +299,22 @@ async function runScraping(filepath, processId) {
                     if (sit.includes('Data')) sit = sit.split('Data')[0];
                     resultData.situacao_cadastral = sit.trim();
                     resultData.data_situacao_cadastral = extractByLabel(['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:']);
-                    resultData.motivo_situacao_cadastral = extractByLabel(['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:']);
+                    
+                    // --- CORREÇÃO MOTIVO (Remover endereço) ---
+                    let motivo = extractByLabel(['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:']);
+                    if (motivo) {
+                         const cutOffs = ['Endereço de Correspondência', 'Endereço:', 'Endereco de Correspondencia', 'Endere&ccedil;o'];
+                         for (const cut of cutOffs) {
+                             // Case insensitive check
+                             const idx = motivo.toLowerCase().indexOf(cut.toLowerCase());
+                             if (idx !== -1) {
+                                 motivo = motivo.substring(0, idx);
+                             }
+                         }
+                    }
+                    resultData.motivo_situacao_cadastral = motivo.trim();
+                    // ------------------------------------------
+
                     resultData.nome_contador = extractByLabel(['Nome (Contador):', 'Nome:']);
                     if (!resultData.municipio) {
                         const m = bodyText.match(/Município:?\s*(.*?)\s*UF:/i);

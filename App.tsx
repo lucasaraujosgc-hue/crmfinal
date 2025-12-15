@@ -52,6 +52,18 @@ function useInterval(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
+// --- HELPERS ---
+
+// Limpa o motivo removendo o endereço de correspondência
+const cleanReasonText = (text: string | null | undefined) => {
+    if (!text) return '';
+    // Corta nas palavras chaves comuns de endereço da SEFAZ
+    return text.split('Endereço de Correspondência')[0]
+               .split('Endereço:')[0]
+               .split('Endereco de Correspondencia')[0]
+               .trim();
+};
+
 // --- EXTRACTED COMPONENTS ---
 
 const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
@@ -192,7 +204,7 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                   </button>
               </td>
               <td className="px-6 py-4 align-top text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
-                  {company.motivoSituacao || 'N/D'}
+                  {cleanReasonText(company.motivoSituacao || 'N/D')}
               </td>
               <td className="px-6 py-4 align-top font-medium text-slate-700">{company.municipio?.replace('Município:', '').trim() || '-'}</td>
             </tr>
@@ -301,7 +313,7 @@ const SelectedLeadModal = ({ company, onClose, onGoToChat }: any) => {
                     <div>
                         <label className="text-xs text-slate-500 uppercase font-bold">Motivo da Inaptidão</label>
                         <div className="bg-rose-50 text-rose-800 p-3 rounded-lg text-sm border border-rose-100">
-                            {company.motivoSituacao || 'Não informado'}
+                            {cleanReasonText(company.motivoSituacao) || 'Não informado'}
                         </div>
                     </div>
                     <div className="flex justify-end gap-3 pt-4">
@@ -487,8 +499,17 @@ const App: React.FC = () => {
       const res = await fetch('/api/unique-filters');
       if (res.ok) {
         const data = await res.json();
-        setAvailableCities(data.municipios || []);
-        setAvailableReasons(data.motivos || []);
+        setAvailableCities((data.municipios as string[]) || []);
+        
+        // --- CLEAN DUPLICATES ---
+        // As we clean the reason in the UI, we must deduplicate the list for the dropdown
+        if (data.motivos) {
+             const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
+             // Remove empty strings and sort
+             setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
+        } else {
+             setAvailableReasons([]);
+        }
       }
     } catch (e) { console.error(e); }
   };
@@ -650,7 +671,12 @@ const App: React.FC = () => {
         
       const cityMatch = !filters.city || c.municipio === filters.city;
       
+      // LOGICA DE FILTRO ATUALIZADA:
+      // Compara se o motivo "Limpo" do lead contem o filtro (que também é limpo)
+      // OU se o motivo original do lead contém o filtro.
+      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
       const reasonMatch = !filters.reason || 
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
         (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
         
       const accountantMatch = filters.hasAccountant === 'all' ? true :
