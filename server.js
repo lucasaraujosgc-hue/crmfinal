@@ -431,16 +431,38 @@ client.on('message', async (msg) => {
                 } catch (e) { }
             }
             if (msg.body) promptParts.push({ text: msg.body });
+            
             try {
                 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                const model = ai.models.generateContent({ 
-                    model: aiConfig.model || 'gemini-2.5-flash',
-                    contents: { role: 'user', parts: promptParts },
-                    config: { systemInstruction: systemInstruction + contextData, temperature: aiConfig.temperature || 0.7 }
-                });
-                const response = await model;
+                
+                // Funcao de Retry
+                const generateWithRetry = async (retries = 3) => {
+                    try {
+                        const model = ai.models.generateContent({ 
+                            model: aiConfig.model || 'gemini-2.5-flash',
+                            contents: { role: 'user', parts: promptParts },
+                            config: { systemInstruction: systemInstruction + contextData, temperature: aiConfig.temperature || 0.7 }
+                        });
+                        return await model;
+                    } catch (err) {
+                        if (retries > 0 && (err.status === 429 || err.message?.includes('429') || err.message?.includes('Quota'))) {
+                            let delay = 30000;
+                            const match = err.message?.match(/retry in ([0-9.]+)s/);
+                            if (match) delay = Math.ceil(parseFloat(match[1]) * 1000) + 1000;
+                            
+                            console.log(`[IA] Cota excedida. Aguardando ${delay/1000}s para tentar novamente...`);
+                            await new Promise(r => setTimeout(r, delay));
+                            return generateWithRetry(retries - 1);
+                        }
+                        throw err;
+                    }
+                };
+
+                const response = await generateWithRetry();
                 await msg.reply(response.text);
-            } catch (error) { console.error("Erro IA:", error); }
+            } catch (error) { 
+                console.error("Erro IA Final:", error.message || error); 
+            }
         }
     );
 });
