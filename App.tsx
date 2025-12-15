@@ -600,6 +600,13 @@ const App: React.FC = () => {
           if (res.ok) {
               alert('Campanha criada e envios iniciados!');
               setIsCreatingCampaign(false);
+              // Reset again just in case
+              setNewCampaign({
+                  name: '',
+                  description: '',
+                  initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+                  aiPersona: DEFAULT_AI_PERSONA
+              });
               fetchCampaigns();
               fetchCompanies();
           } else {
@@ -688,6 +695,19 @@ const App: React.FC = () => {
       } else {
           alert('Empresa sem telefone cadastrado.');
       }
+  };
+
+  // Handler to reset and open campaign wizard
+  const handleOpenNewCampaign = () => {
+      setNewCampaign({
+          name: '',
+          description: '',
+          initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+          aiPersona: DEFAULT_AI_PERSONA
+      });
+      setSelectedIds(new Set());
+      setCampaignStep(1);
+      setIsCreatingCampaign(true);
   };
 
   // --- Render ---
@@ -965,7 +985,7 @@ const App: React.FC = () => {
                    <div className="space-y-6">
                        <div className="flex justify-between items-center">
                            <h2 className="text-xl font-bold text-slate-700">Minhas Campanhas</h2>
-                           <button onClick={() => setIsCreatingCampaign(true)} className="btn-primary flex items-center gap-2">
+                           <button onClick={handleOpenNewCampaign} className="btn-primary flex items-center gap-2">
                                <Plus size={18}/> Nova Campanha
                            </button>
                        </div>

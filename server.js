@@ -100,12 +100,12 @@ db.serialize(() => {
     FOREIGN KEY(consulta_id) REFERENCES consulta(id),
     FOREIGN KEY(campaign_id) REFERENCES campaign(id)
   )`, (err) => {
-      // Safe migration for existing databases: Try to add the column if it doesn't exist
+      // Safe migration for existing databases
       if (!err) {
-          db.run("ALTER TABLE resultado ADD COLUMN ai_active INTEGER DEFAULT 1", (err) => {
-              // Ignore error if column already exists
-          });
+          db.run("ALTER TABLE resultado ADD COLUMN ai_active INTEGER DEFAULT 1", (err) => {});
       }
+      // Resume queues after DB init
+      setTimeout(resumeQueues, 5000);
   });
 });
 
@@ -136,29 +136,16 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- SCRAPING LOGIC ---
 
-// Helper function to decode HTML entities
 function decodeHTMLEntities(text) {
     if (!text) return '';
     const entities = {
-        '&amp;': '&',
-        '&lt;': '<',
-        '&gt;': '>',
-        '&quot;': '"',
-        '&apos;': "'",
-        '&nbsp;': ' ',
-        '&atilde;': 'ã',
-        '&ccedil;': 'ç',
-        '&iacute;': 'í',
-        '&ocirc;': 'ô',
-        '&otilde;': 'õ',
-        '&uacute;': 'ú',
-        '&nbsp;': ' '
+        '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'",
+        '&nbsp;': ' ', '&atilde;': 'ã', '&ccedil;': 'ç', '&iacute;': 'í',
+        '&ocirc;': 'ô', '&otilde;': 'õ', '&uacute;': 'ú'
     };
     return text.replace(/&[a-z]+;/g, match => entities[match] || match);
 }
 
-// LISTA MESTRA DE RÓTULOS
-// Usada para identificar onde um campo termina e outro começa
 const KNOWN_LABELS = [
     'Natureza Jurídica:', 'Natureza Jur&iacute;dica:',
     'Nome Fantasia:', 'Razão Social:', 'Raz&atilde;o Social:',
@@ -179,37 +166,24 @@ const KNOWN_LABELS = [
 function cleanValue(val, currentLabel = '') {
     if (!val) return '';
     let cleaned = val.replace(/&nbsp;/g, ' ').replace(/\u00a0/g, ' ').trim();
-    
-    // 1. Remove o próprio rótulo se ele veio junto no início
     if (currentLabel) {
         const plainLabel = currentLabel.replace(/<[^>]*>/g, '').replace(':', '').trim();
-        // Regex para remover o label do inicio da string (case insensitive)
         const regexSelf = new RegExp(`^${plainLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:?\\s*`, 'i');
         cleaned = cleaned.replace(regexSelf, '');
     }
-
-    // 2. CORTE AGRESSIVO: Se encontrar QUALQUER outro rótulo conhecido no meio do texto, corta tudo depois.
     for (const label of KNOWN_LABELS) {
-        // Normaliza o label para busca (remove tags HTML e decode simples)
         const plainLabel = label.replace(/<[^>]*>/g, '').replace(':', '').trim();
         const decodedLabel = decodeHTMLEntities(plainLabel);
-        
-        // Verifica variações
         const checks = [plainLabel, decodedLabel];
-        
         for (const check of checks) {
-             if (!check || check.length < 3) continue; // Pula labels muito curtos para evitar falsos positivos
-             
-             // Procura " Label:" (com dois pontos) no meio do texto
+             if (!check || check.length < 3) continue;
              const regexCut = new RegExp(`${check.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'i');
              const match = cleaned.match(regexCut);
-             
              if (match && match.index !== undefined && match.index > 0) {
                  cleaned = cleaned.substring(0, match.index);
              }
         }
     }
-    
     return cleaned.trim();
 }
 
@@ -227,13 +201,10 @@ async function runScraping(filepath, processId) {
         
         const ies = new Set();
         const regexStrict = /(\d{2,3}\.?\d{3}\.?\d{3})-[A-Z]{2}/g;
-        
         let match;
         while ((match = regexStrict.exec(cleanText)) !== null) {
             const ieDigits = match[1].replace(/\D/g, '');
-            if (ieDigits.length >= 8 && ieDigits.length <= 9) {
-                 ies.add(ieDigits);
-            }
+            if (ieDigits.length >= 8 && ieDigits.length <= 9) ies.add(ieDigits);
         }
 
         const ieList = Array.from(ies);
@@ -291,80 +262,53 @@ async function runScraping(filepath, processId) {
                 const bodyText = $('body').text().replace(/\s+/g, ' ');
 
                 if (bodyText.includes('Consulta Básica ao Cadastro do ICMS') || bodyText.includes('Razão Social')) {
-                    
-                    // --- FUNÇÃO DE EXTRAÇÃO DOM ---
                     const extractByLabel = (labels) => {
                         for (const label of labels) {
-                            // Encontra elemento que contem o label
                             const element = $(`td, b, font`).filter((i, el) => {
                                 return $(el).text().trim().startsWith(label) || $(el).text().trim().includes(label);
                             }).first();
-
                             if (element.length > 0) {
                                 let rawText = '';
-                                
-                                // Caso 1: Texto está no pai (ex: <td><b>Label:</b> Valor</td>)
                                 const parentText = element.parent().text();
-                                if (parentText.includes(label)) {
-                                    rawText = parentText.split(label)[1];
-                                }
-                                
-                                // Caso 2: Texto está na próxima célula
+                                if (parentText.includes(label)) rawText = parentText.split(label)[1];
                                 if (!rawText || rawText.trim().length === 0) {
                                     const nextTd = element.closest('td').next('td');
                                     if (nextTd.length) rawText = nextTd.text();
                                 }
-                                
-                                // Caso 3: Texto está no próximo irmão
                                 if (!rawText && element[0].nextSibling && element[0].nextSibling.nodeType === 3) {
                                      rawText = $(element[0].nextSibling).text();
                                 }
-
                                 if (rawText) return cleanValue(rawText, label);
                             }
                         }
                         return '';
                     };
 
-                    // Extração dos campos
                     resultData.razao_social = extractByLabel(['Razão Social:', 'Raz&atilde;o Social:']);
                     resultData.nome_fantasia = extractByLabel(['Nome Fantasia:']);
                     resultData.cnpj = extractByLabel(['CNPJ:']);
-                    
-                    // --- CORREÇÃO MUNICÍPIO ---
-                    // Usa as chaves exatas e força corte em "UF:"
                     let muni = extractByLabel(['Município:', 'Munic&iacute;pio:']);
                     if (muni.includes('UF')) muni = muni.split('UF')[0];
                     resultData.municipio = muni.trim();
-                    
                     resultData.uf = extractByLabel(['UF:']);
                     resultData.logradouro = extractByLabel(['Logradouro:']);
                     resultData.bairro_distrito = extractByLabel(['Bairro/Distrito:']);
                     resultData.cep = extractByLabel(['CEP:']);
                     resultData.telefone = extractByLabel(['Telefone:']);
-                    
-                    // --- CORREÇÃO SITUAÇÃO ---
-                    // Força corte em "Data" para não pegar a data junto
                     let sit = extractByLabel(['Situação Cadastral Vigente:', 'Situa&ccedil;&atilde;o Cadastral Vigente:']);
                     if (sit.includes('Data')) sit = sit.split('Data')[0];
                     resultData.situacao_cadastral = sit.trim();
-
                     resultData.data_situacao_cadastral = extractByLabel(['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:']);
                     resultData.motivo_situacao_cadastral = extractByLabel(['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:']);
                     resultData.nome_contador = extractByLabel(['Nome (Contador):', 'Nome:']);
-
-                    // Fallbacks Regex (Último recurso)
                     if (!resultData.municipio) {
                         const m = bodyText.match(/Município:?\s*(.*?)\s*UF:/i);
                         if (m) resultData.municipio = m[1].trim();
                     }
-
                     resultData.status = 'Sucesso';
-
                 } else {
                     resultData.status = 'Erro: IE não localizada ou site indisponível';
                 }
-
             } catch (err) {
                 console.error(`[Scraper] Erro IE ${ie}:`, err.message);
                 resultData.status = 'Erro: ' + err.message;
@@ -373,7 +317,6 @@ async function runScraping(filepath, processId) {
             const cols = Object.keys(resultData).join(',');
             const vals = Object.values(resultData);
             const placeholders = vals.map(() => '?').join(',');
-            
             db.run(`INSERT INTO resultado (${cols}) VALUES (${placeholders})`, vals);
             db.run('UPDATE consulta SET processed = ? WHERE id = ?', [i + 1, processId]);
             await new Promise(r => setTimeout(r, 1500));
@@ -384,7 +327,6 @@ async function runScraping(filepath, processId) {
         } else {
              db.run('UPDATE consulta SET status = "completed", end_time = ? WHERE id = ?', [new Date().toISOString(), processId]);
         }
-
     } catch (error) {
         console.error('[Scraper] Fatal:', error);
         db.run('UPDATE consulta SET status = "error" WHERE id = ?', [processId]);
@@ -394,7 +336,6 @@ async function runScraping(filepath, processId) {
     }
 }
 
-// --- CLEANUP LOCK FILES ON STARTUP ---
 function cleanAuthLock() {
     try {
         if (fs.existsSync(AUTH_DIR)) {
@@ -415,7 +356,6 @@ function cleanAuthLock() {
         console.error('[Startup] Error cleaning lock files:', e);
     }
 }
-
 cleanAuthLock();
 
 // --- WHATSAPP CLIENT ---
@@ -444,22 +384,17 @@ client.on('message', async (msg) => {
 
     db.get(`SELECT * FROM resultado WHERE telefone LIKE ? ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix}`], async (err, company) => {
             if (company && company.ai_active === 0) return;
-
             let systemInstruction = aiConfig.persona;
             if (company && company.campaign_id) {
                  const campaign = await new Promise(resolve => db.get('SELECT * FROM campaign WHERE id = ?', [company.campaign_id], (e, r) => resolve(r)));
                  if (campaign && campaign.ai_persona) systemInstruction = campaign.ai_persona;
             }
-
             let contextData = "";
             let matchedRule = null;
-
             if (company) {
                 if (company.campaign_status === 'sent') db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ?`, [company.id]);
-
                 contextData += `\n\n--- DADOS DA EMPRESA (CLIENTE) ---\n`;
                 contextData += `Razão Social: ${company.razao_social}\nIE: ${company.inscricao_estadual}\nStatus: ${company.situacao_cadastral}\nMotivo: ${company.motivo_situacao_cadastral}\nMunicípio: ${company.municipio}\n`;
-                
                 if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
                     const companyReason = company.motivo_situacao_cadastral.toLowerCase().trim();
                     matchedRule = aiConfig.knowledgeRules.find(rule => {
@@ -473,7 +408,6 @@ client.on('message', async (msg) => {
                     }
                 }
             }
-
             let promptParts = [];
             if (msg.hasMedia) {
                 try {
@@ -482,7 +416,6 @@ client.on('message', async (msg) => {
                 } catch (e) { }
             }
             if (msg.body) promptParts.push({ text: msg.body });
-            
             try {
                 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
                 const model = ai.models.generateContent({ 
@@ -500,6 +433,77 @@ client.on('message', async (msg) => {
 try { client.initialize().catch(err => console.error('[WhatsApp] Init Error:', err)); } catch(err) {}
 
 process.on('SIGINT', async () => { await client.destroy(); process.exit(0); });
+
+// --- CAMPAIGN LOGIC ---
+
+// 1. Recover Queues on Startup
+function resumeQueues() {
+    console.log('[Campaign] Verificando filas pausadas...');
+    db.all("SELECT DISTINCT campaign_id FROM resultado WHERE campaign_status = 'queued'", (err, rows) => {
+        if(err) return console.error(err);
+        rows.forEach(row => {
+            db.get("SELECT initial_message FROM campaign WHERE id = ?", [row.campaign_id], (err, camp) => {
+                if(camp) {
+                    console.log(`[Campaign] Retomando campanha ${row.campaign_id}`);
+                    startCampaignSending(row.campaign_id, camp.initial_message);
+                }
+            });
+        });
+    });
+}
+
+// 2. Robust Sending Function
+function startCampaignSending(campaignId, message) {
+    const processQueue = () => {
+        // Encontra o próximo lead na fila
+        db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND campaign_status = 'queued' LIMIT 1`, [campaignId], async (err, lead) => {
+            if (err) return console.error("[Campaign] DB Error:", err);
+            if (!lead) return console.log(`[Campaign] Fila finalizada para ${campaignId}`);
+            
+            let sent = false;
+            let status = 'skipped';
+            
+            if (lead.telefone && clientReady) {
+                 try {
+                     const cleanPhone = lead.telefone.replace(/\D/g, '');
+                     // Validação básica de número BR
+                     if(cleanPhone.length >= 10) {
+                         const target = cleanPhone.length < 12 ? '55' + cleanPhone : cleanPhone;
+                         const chatId = target + "@c.us";
+                         await client.sendMessage(chatId, message);
+                         sent = true;
+                         status = 'sent';
+                     } else {
+                         status = 'error'; // Número inválido
+                     }
+                 } catch (e) { 
+                     console.error(`[Campaign] Falha envio para ${lead.razao_social}:`, e.message);
+                     status = 'error';
+                 }
+            } else if (lead.telefone && !clientReady) {
+                // Se tem telefone mas o client nao ta pronto, mantem na fila ou marca erro?
+                // Vamos marcar erro temporário ou tentar reconectar, mas para evitar loop infinito de erro, marcamos error.
+                status = 'error'; 
+                console.log("[Campaign] Client WhatsApp não pronto. Marcando erro.");
+            }
+
+            // ATUALIZAÇÃO SÍNCRONA: Só chama o próximo depois de atualizar o atual.
+            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, 
+                [status, new Date().toISOString(), lead.id], 
+                (updateErr) => {
+                    if(updateErr) console.error("[Campaign] Erro ao atualizar status:", updateErr);
+                    
+                    // Delay aleatório entre 15s e 30s para evitar banimento
+                    const delay = Math.floor(Math.random() * 15000) + 15000;
+                    console.log(`[Campaign] Lead processado (${status}). Próximo em ${delay/1000}s...`);
+                    setTimeout(processQueue, delay);
+                }
+            );
+        });
+    };
+    processQueue();
+}
+
 
 // --- API ROUTES ---
 app.post('/api/config/ai-rules', (req, res) => {
@@ -618,29 +622,14 @@ app.post('/api/campaigns', (req, res) => {
                 if (leads && leads.length > 0) {
                      const placeholders = leads.map(() => '?').join(',');
                      db.run(`UPDATE resultado SET campaign_id = ?, campaign_status = 'queued' WHERE id IN (${placeholders})`,
-                     [campaignId, ...leads], () => { startCampaignSending(campaignId, initialMessage); res.json({ success: true, campaignId }); });
+                     [campaignId, ...leads], () => { 
+                         // Inicia o envio (mas retorna resposta HTTP rápido)
+                         startCampaignSending(campaignId, initialMessage); 
+                         res.json({ success: true, campaignId }); 
+                     });
                 } else { res.json({ success: true, campaignId }); }
             });
 });
-
-function startCampaignSending(campaignId, message) {
-    const processQueue = () => {
-        db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND campaign_status = 'queued' LIMIT 1`, [campaignId], async (err, lead) => {
-            if (!lead) return;
-            let sent = false;
-            if (lead.telefone && clientReady) {
-                 try {
-                     const chatId = (lead.telefone.replace(/\D/g, '').length < 12 ? '55' + lead.telefone.replace(/\D/g, '') : lead.telefone.replace(/\D/g, '')) + "@c.us";
-                     await client.sendMessage(chatId, message);
-                     sent = true;
-                 } catch (e) { }
-            } 
-            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [sent ? 'sent' : (lead.telefone ? 'error' : 'skipped'), new Date().toISOString(), lead.id]);
-            setTimeout(processQueue, Math.floor(Math.random() * 10000) + 5000);
-        });
-    };
-    processQueue();
-}
 
 app.get('/api/whatsapp/status', (req, res) => res.json({ status: clientReady ? 'connected' : 'disconnected', qr: qrCodeData }));
 app.get('/api/whatsapp/chats', async (req, res) => {
