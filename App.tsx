@@ -4,7 +4,7 @@ import {
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
   BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
-  ToggleLeft, ToggleRight, Power
+  ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -62,6 +62,21 @@ const cleanReasonText = (text: string | null | undefined) => {
                .split('Endereço:')[0]
                .split('Endereco de Correspondencia')[0]
                .trim();
+};
+
+const formatTime = (timestamp: number) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const getInitials = (name: string) => {
+    return name
+        .split(' ')
+        .map(n => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase();
 };
 
 // --- EXTRACTED COMPONENTS ---
@@ -501,11 +516,8 @@ const App: React.FC = () => {
         const data = await res.json();
         setAvailableCities((data.municipios as string[]) || []);
         
-        // --- CLEAN DUPLICATES ---
-        // As we clean the reason in the UI, we must deduplicate the list for the dropdown
         if (data.motivos) {
              const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
-             // Remove empty strings and sort
              setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
         } else {
              setAvailableReasons([]);
@@ -671,9 +683,6 @@ const App: React.FC = () => {
         
       const cityMatch = !filters.city || c.municipio === filters.city;
       
-      // LOGICA DE FILTRO ATUALIZADA:
-      // Compara se o motivo "Limpo" do lead contem o filtro (que também é limpo)
-      // OU se o motivo original do lead contém o filtro.
       const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
       const reasonMatch = !filters.reason || 
         (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
@@ -741,13 +750,25 @@ const App: React.FC = () => {
   // Helper to find company in active chat
   const activeChatCompany = useMemo(() => {
       if (!activeChat || companies.length === 0) return null;
-      const cleanChatPhone = activeChat.replace(/\D/g, '');
+      
+      // 1. Try to clean the ID (only digits)
+      const cleanChatId = activeChat.replace(/\D/g, '');
+      
+      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
+      // This solves the @lid issue where the ID is not the phone number
+      const currentChatObj = chats.find(c => c.id === activeChat);
+      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
+
       return companies.find(c => {
           if (!c.telefone) return false;
           const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
-          return cleanChatPhone.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(cleanChatPhone);
+          
+          // Match against ID digits OR Name digits
+          return cleanChatId.includes(cleanCompanyPhone) || 
+                 cleanCompanyPhone.includes(cleanChatId) ||
+                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
       });
-  }, [activeChat, companies]);
+  }, [activeChat, companies, chats]);
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -837,6 +858,7 @@ const App: React.FC = () => {
 
         <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
           
+          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -1078,101 +1100,224 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* --- WHATSAPP TAB --- */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6">
-              <div className="w-1/3 card-premium flex flex-col">
-                <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl">
-                   {waSession.status !== 'connected' && waSession.qrCode ? (
-                      <div className="text-center p-4">
-                         <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mx-auto" />
-                         <p className="text-sm font-medium text-slate-600 animate-pulse mt-2">Escaneie para conectar</p>
-                      </div>
-                   ) : (
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-bold text-slate-700">Conversas</h3>
-                        <span className="text-xs bg-emerald-100 text-emerald-600 px-2 py-1 rounded-full">{waSession.status}</span>
-                      </div>
-                   )}
+              {/* Sidebar List */}
+              <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                       <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                           <User size={20} />
+                       </div>
+                       <h3 className="font-bold text-slate-700">Conversas</h3>
+                   </div>
+                   <div className="flex gap-2">
+                        <div className={`w-3 h-3 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`} title={waSession.status}></div>
+                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                   {chats.map(chat => (
-                      <div key={chat.id} onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} className={`p-4 border-b hover:bg-slate-50 cursor-pointer ${activeChat === chat.id ? 'bg-brand-50 border-l-4 border-l-brand-500' : ''}`}>
-                         <h4 className="font-semibold text-sm truncate">{chat.name}</h4>
-                         <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
-                      </div>
-                   ))}
-                </div>
+                
+                {waSession.status !== 'connected' && waSession.qrCode ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50/50">
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                            <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mix-blend-multiply" />
+                        </div>
+                        <p className="text-sm font-medium text-slate-600 animate-pulse flex items-center gap-2">
+                            <Phone size={16}/> Escaneie para conectar
+                        </p>
+                    </div>
+                ) : (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {chats.map(chat => (
+                            <div 
+                                key={chat.id} 
+                                onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} 
+                                className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex gap-3 ${activeChat === chat.id ? 'bg-slate-100' : ''}`}
+                            >
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-100 to-brand-200 flex-shrink-0 flex items-center justify-center text-brand-600 font-bold text-sm">
+                                    {getInitials(chat.name || 'Unknown')}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-baseline mb-1">
+                                        <h4 className="font-semibold text-slate-800 text-sm truncate">{chat.name || chat.id.split('@')[0]}</h4>
+                                        <span className="text-[10px] text-slate-400 font-medium">{formatTime(chat.timestamp)}</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                                </div>
+                                {chat.unreadCount > 0 && (
+                                    <div className="flex flex-col justify-center">
+                                        <span className="bg-emerald-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                                            {chat.unreadCount}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
               </div>
-              <div className="flex-1 card-premium flex flex-col">
+
+              {/* Chat Window */}
+              <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
+                {/* Background Pattern Overlay (Optional) */}
+                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
+
                 {activeChat ? (
                   <>
-                     <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white rounded-t-2xl">
+                     {/* Header */}
+                     <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
                         <div className="flex items-center gap-3">
-                            <div>
-                                <h3 className="font-bold text-slate-800">{chats.find(c => c.id === activeChat)?.name}</h3>
-                                <p className="text-xs text-slate-500">{activeChat.replace('@c.us', '')}</p>
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
+                                {activeChatCompany ? (
+                                    <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold">
+                                        {activeChatCompany.razaoSocial.substring(0,2)}
+                                    </div>
+                                ) : (
+                                    <User size={20} />
+                                )}
                             </div>
-                            {/* PER-CHAT AI TOGGLE */}
+                            <div className="flex flex-col">
+                                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                    {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
+                                    {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
+                                </h3>
+                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
+                                {activeChatCompany ? (
+                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
+                                ) : (
+                                    <p className="text-[10px] text-slate-400">online</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {/* AI Toggle */}
                             {activeChatCompany && (
                                 <button 
                                     onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all ${
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-xs font-bold ${
                                         activeChatCompany.aiActive 
-                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-sm' 
                                         : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
                                     }`}
-                                    title={activeChatCompany.aiActive ? "Desativar IA para este contato" : "Ativar IA para este contato"}
                                 >
-                                    {activeChatCompany.aiActive ? (
-                                        <>
-                                            <Bot size={16} className="text-emerald-500" />
-                                            <span className="text-xs font-bold">IA Auto</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Power size={16} className="text-slate-400" />
-                                            <span className="text-xs font-bold">IA Off</span>
-                                        </>
-                                    )}
+                                    {activeChatCompany.aiActive ? <Bot size={16} /> : <Power size={16} />}
+                                    {activeChatCompany.aiActive ? "IA Auto" : "IA Off"}
                                 </button>
                             )}
-                        </div>
-                        <div className="flex gap-2 items-center">
-                             <button onClick={() => {
-                                 const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-                                 if(comp) updateLeadStatus(comp.id, 'interested');
-                             }} className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 font-medium">Interessado</button>
-                             <button onClick={() => {
-                                 const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-                                 if(comp) updateLeadStatus(comp.id, 'not_interested');
-                             }} className="text-xs px-3 py-1 bg-rose-100 text-rose-700 rounded-lg hover:bg-rose-200 font-medium">Descartar</button>
+
+                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
+
+                            {/* Actions Menu */}
+                            <div className="flex items-center gap-1">
+                                <button 
+                                    title="Marcar como Interessado"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'interested');
+                                    }} 
+                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
+                                >
+                                    <CheckCircle2 size={20} />
+                                </button>
+                                <button 
+                                    title="Descartar"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
+                                    }} 
+                                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
+                                <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
+                                    <MoreVertical size={20} />
+                                </button>
+                            </div>
                         </div>
                      </div>
-                     <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#efeae2]">
+
+                     {/* Messages Area */}
+                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
                         {chatMessages.map(msg => (
-                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-[70%] rounded-xl p-3 shadow-sm text-sm ${msg.fromMe ? 'bg-[#d9fdd3]' : 'bg-white'}`}>
-                                 {msg.hasMedia && <div className="text-xs text-slate-500 mb-1 flex items-center gap-1"><Paperclip size={12}/> Mídia</div>}
-                                 <p className="whitespace-pre-wrap">{msg.body}</p>
+                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
+                              <div className={`relative max-w-[75%] px-3 py-2 text-sm shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] ${
+                                  msg.fromMe 
+                                  ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
+                                  : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
+                              }`}>
+                                 {/* Triangle tail */}
+                                 <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
+                                     msg.fromMe 
+                                     ? '-right-[6px] border-t-[#d9fdd3]' 
+                                     : '-left-[6px] border-t-white'
+                                 }`}></div>
+
+                                 {msg.hasMedia && (
+                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
+                                         <PaperclipIcon size={12}/> Mídia Oculta
+                                     </div>
+                                 )}
+                                 
+                                 <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
+                                 
+                                 <div className="absolute bottom-1 right-2 flex items-center gap-1">
+                                     <span className="text-[10px] text-slate-500/80">
+                                         {formatTime(msg.timestamp)}
+                                     </span>
+                                     {msg.fromMe && <Check size={12} className="text-emerald-500" />}
+                                 </div>
                               </div>
                            </div>
                         ))}
                      </div>
-                     <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2 rounded-b-2xl">
-                        <input type="text" className="flex-1 bg-slate-100 rounded-full px-4 py-2 outline-none focus:ring-2 focus:ring-brand-200 transition-all" value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Digite uma mensagem..." />
-                        <button onClick={sendMessage} className="p-2 bg-brand-600 text-white rounded-full hover:bg-brand-700 transition-colors"><Send size={18} /></button>
+
+                     {/* Input Area */}
+                     <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <Smile size={24} />
+                        </button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <PaperclipIcon size={22} />
+                        </button>
+                        
+                        <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
+                            <input 
+                                type="text" 
+                                className="flex-1 bg-transparent outline-none text-slate-800 placeholder-slate-400"
+                                value={newMessage} 
+                                onChange={e => setNewMessage(e.target.value)} 
+                                onKeyDown={e => e.key === 'Enter' && sendMessage()} 
+                                placeholder="Digite uma mensagem..." 
+                            />
+                        </div>
+
+                        {newMessage.trim() ? (
+                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
+                                <Send size={20} className="ml-0.5" />
+                            </button>
+                        ) : (
+                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                                <Mic size={24} />
+                            </button>
+                        )}
                      </div>
                   </>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                      <MessageCircle size={48} className="mb-2 opacity-20"/>
-                      <p>Selecione uma conversa para iniciar o atendimento</p>
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-[#f0f2f5] border-b-[6px] border-brand-500/20">
+                      <div className="w-64 h-64 opacity-10 bg-contain bg-no-repeat bg-center mb-4" style={{ backgroundImage: 'url("https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg")' }}></div>
+                      <h2 className="text-2xl font-light text-slate-600 mb-2">WhatsApp CRM</h2>
+                      <p className="text-sm text-slate-500 max-w-sm text-center">Selecione uma conversa para iniciar o atendimento ou visualizar o histórico.</p>
+                      <div className="mt-8 text-xs text-slate-400 flex items-center gap-1">
+                          <Bot size={12}/> IA Ativa e pronta para vender
+                      </div>
                   </div>
                 )}
               </div>
             </div>
           )}
 
+           {/* ... (Other settings tabs remain the same) ... */}
            {activeTab === 'knowledge' && (
               <div className="max-w-4xl mx-auto space-y-6">
                  <div className="flex justify-between items-center">
