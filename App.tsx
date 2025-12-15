@@ -54,7 +54,6 @@ function useInterval(callback: () => void, delay: number | null) {
 
 // --- EXTRACTED COMPONENTS ---
 
-// Using React.memo to prevent re-renders losing input focus
 const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
   <div className="card-premium p-4 flex flex-col gap-4 mb-6">
     <div className="flex flex-col md:flex-row gap-4">
@@ -120,7 +119,7 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                   </button>
               </th>
             )}
-            <th className="px-6 py-4">Empresa</th>
+            <th className="px-6 py-4 w-[350px]">Empresa</th>
             <th className="px-6 py-4">Situação</th>
             <th className="px-6 py-4">Status WhatsApp</th>
             <th className="px-6 py-4 text-center">IA Ativa</th>
@@ -139,49 +138,63 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                   </td>
               )}
               <td className="px-6 py-4">
-                <div className="flex flex-col gap-1">
-                    <p className="font-bold text-slate-900 text-base">{company.razaoSocial || 'Razão Social N/D'}</p>
-                    {company.nomeFantasia && (
-                         <p className="text-sm text-slate-600">{company.nomeFantasia}</p>
+                <div className="flex flex-col gap-1.5">
+                    {/* Razão Social em Destaque */}
+                    <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
+                    
+                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
+                    {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
+                         <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
                     )}
-                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 mt-1">
-                        <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">CNPJ: {company.cnpj}</span>
-                        <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">IE: {company.inscricaoEstadual}</span>
+                    
+                    {/* Badges de IDs */}
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                        <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
+                           CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
+                        </span>
+                        <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
+                           IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
+                        </span>
                     </div>
+
+                    {/* Data da Situação movida para cá */}
                     {company.dataSituacaoCadastral && (
-                        <p className="text-[10px] text-rose-600 font-bold mt-1">
-                            📅 {company.dataSituacaoCadastral}
-                        </p>
+                        <div className="flex items-center gap-1 mt-1 text-rose-600">
+                            <AlertCircle size={10} />
+                            <span className="text-[10px] font-bold">Desde: {company.dataSituacaoCadastral}</span>
+                        </div>
                     )}
                 </div>
               </td>
-              <td className="px-6 py-4">
-                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
-                  company.situacaoCadastral?.toUpperCase().includes('ATIVA') ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+              <td className="px-6 py-4 align-top">
+                <span className={`inline-flex px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                  company.situacaoCadastral?.toUpperCase().includes('ATIVA') 
+                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                  : 'bg-rose-100 text-rose-700 border border-rose-200'
                 }`}>
-                  {company.situacaoCadastral || 'Desconhecida'}
+                  {company.situacaoCadastral?.replace('Situação Cadastral Vigente:', '').trim() || 'N/D'}
                 </span>
               </td>
-              <td className="px-6 py-4">
+              <td className="px-6 py-4 align-top">
                    <StatusBadge status={company.campaignStatus} />
               </td>
-              <td className="px-6 py-4 text-center">
+              <td className="px-6 py-4 align-top text-center">
                   <button 
                     onClick={() => onToggleAi && onToggleAi(company.id, company.aiActive)}
                     className={`p-1.5 rounded-full transition-colors ${
                         company.aiActive 
-                        ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200' 
-                        : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                        ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100' 
+                        : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-100'
                     }`}
                     title={company.aiActive ? "Desativar IA" : "Ativar IA"}
                   >
                       {company.aiActive ? <Bot size={18} /> : <Power size={18} />}
                   </button>
               </td>
-              <td className="px-6 py-4 text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
+              <td className="px-6 py-4 align-top text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
                   {company.motivoSituacao || 'N/D'}
               </td>
-              <td className="px-6 py-4">{company.municipio || '-'}</td>
+              <td className="px-6 py-4 align-top font-medium text-slate-700">{company.municipio?.replace('Município:', '').trim() || '-'}</td>
             </tr>
           ))}
         </tbody>
