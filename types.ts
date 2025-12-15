@@ -64,6 +64,11 @@ export interface KnowledgeRule {
 }
 
 export interface AIConfig {
+  provider: 'gemini' | 'groq';
+  apiKeys: {
+    gemini?: string;
+    groq?: string;
+  };
   model: string;
   persona: string;
   knowledgeRules: KnowledgeRule[];

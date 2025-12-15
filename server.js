@@ -11,6 +11,7 @@ const { Client, LocalAuth } = pkg;
 import QRCode from 'qrcode';
 import fs from 'fs';
 import { GoogleGenAI } from "@google/genai";
+import { Groq } from 'groq-sdk';
 import multer from 'multer';
 import sqlite3 from 'sqlite3';
 import pdf from 'pdf-parse/lib/pdf-parse.js';
@@ -111,6 +112,11 @@ db.serialize(() => {
 
 // Load AI Config
 let aiConfig = {
+  provider: 'gemini',
+  apiKeys: {
+    gemini: '',
+    groq: ''
+  },
   model: 'gemini-2.5-flash',
   persona: 'Você é um assistente útil.',
   knowledgeRules: [], 
@@ -393,12 +399,27 @@ client.on('qr', (qr) => QRCode.toDataURL(qr, (err, url) => qrCodeData = url));
 client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = true; qrCodeData = null; });
 
 client.on('message', async (msg) => {
+    // 1. FILTROS BÁSICOS DE SEGURANÇA E TIPO
     if (msg.fromMe || !aiConfig.aiActive) return;
+    if (msg.from.includes('@g.us')) return; 
+    if (msg.from.includes('status@broadcast')) return;
+
     const rawPhone = msg.from.replace(/\D/g, '');
     const phoneSuffix = rawPhone.slice(-8);
 
     db.get(`SELECT * FROM resultado WHERE telefone LIKE ? ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix}`], async (err, company) => {
-            if (company && company.ai_active === 0) return;
+            if (err) {
+                console.error("[DB] Erro ao buscar empresa:", err);
+                return;
+            }
+
+            // 2. VERIFICAÇÃO RIGOROSA
+            if (!company) return; 
+
+            // 3. VERIFICAÇÃO DE TOGGLE INDIVIDUAL
+            if (company.ai_active === 0) return;
+
+            // --- INÍCIO DO PROCESSO DE RESPOSTA DA IA ---
             let systemInstruction = aiConfig.persona;
             if (company && company.campaign_id) {
                  const campaign = await new Promise(resolve => db.get('SELECT * FROM campaign WHERE id = ?', [company.campaign_id], (e, r) => resolve(r)));
@@ -406,60 +427,101 @@ client.on('message', async (msg) => {
             }
             let contextData = "";
             let matchedRule = null;
-            if (company) {
-                if (company.campaign_status === 'sent') db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ?`, [company.id]);
-                contextData += `\n\n--- DADOS DA EMPRESA (CLIENTE) ---\n`;
-                contextData += `Razão Social: ${company.razao_social}\nIE: ${company.inscricao_estadual}\nStatus: ${company.situacao_cadastral}\nMotivo: ${company.motivo_situacao_cadastral}\nMunicípio: ${company.municipio}\n`;
-                if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
-                    const companyReason = company.motivo_situacao_cadastral.toLowerCase().trim();
-                    matchedRule = aiConfig.knowledgeRules.find(rule => {
-                        if (!rule.isActive || !rule.motivoSituacao) return false;
-                        const ruleReason = rule.motivoSituacao.toLowerCase().trim();
-                        return companyReason.includes(ruleReason) || ruleReason.includes(companyReason);
-                    });
-                    if (matchedRule) {
-                        contextData += `\n--- DIAGNÓSTICO E INSTRUÇÕES ---\nProblema: "${matchedRule.motivoSituacao}".\nInstruções:\n`;
-                        if (matchedRule.instructions) matchedRule.instructions.forEach(inst => contextData += `- [${inst.title}]: ${inst.content}\n`);
-                    }
+            
+            if (company.campaign_status === 'sent') {
+                db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ?`, [company.id]);
+            }
+
+            contextData += `\n\n--- DADOS DA EMPRESA (CLIENTE) ---\n`;
+            contextData += `Razão Social: ${company.razao_social}\nIE: ${company.inscricao_estadual}\nStatus: ${company.situacao_cadastral}\nMotivo: ${company.motivo_situacao_cadastral}\nMunicípio: ${company.municipio}\n`;
+            
+            if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
+                const companyReason = company.motivo_situacao_cadastral.toLowerCase().trim();
+                matchedRule = aiConfig.knowledgeRules.find(rule => {
+                    if (!rule.isActive || !rule.motivoSituacao) return false;
+                    const ruleReason = rule.motivoSituacao.toLowerCase().trim();
+                    return companyReason.includes(ruleReason) || ruleReason.includes(companyReason);
+                });
+                if (matchedRule) {
+                    contextData += `\n--- DIAGNÓSTICO E INSTRUÇÕES ---\nProblema: "${matchedRule.motivoSituacao}".\nInstruções:\n`;
+                    if (matchedRule.instructions) matchedRule.instructions.forEach(inst => contextData += `- [${inst.title}]: ${inst.content}\n`);
                 }
             }
-            let promptParts = [];
-            if (msg.hasMedia) {
-                try {
-                    const media = await msg.downloadMedia();
-                    if (media) promptParts.push({ inlineData: { mimeType: media.mimetype, data: media.data } });
-                } catch (e) { }
-            }
-            if (msg.body) promptParts.push({ text: msg.body });
-            
-            try {
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-                
-                // Funcao de Retry
-                const generateWithRetry = async (retries = 3) => {
-                    try {
-                        const model = ai.models.generateContent({ 
-                            model: aiConfig.model || 'gemini-2.5-flash',
-                            contents: { role: 'user', parts: promptParts },
-                            config: { systemInstruction: systemInstruction + contextData, temperature: aiConfig.temperature || 0.7 }
-                        });
-                        return await model;
-                    } catch (err) {
-                        if (retries > 0 && (err.status === 429 || err.message?.includes('429') || err.message?.includes('Quota'))) {
-                            let delay = 30000;
-                            const match = err.message?.match(/retry in ([0-9.]+)s/);
-                            if (match) delay = Math.ceil(parseFloat(match[1]) * 1000) + 1000;
-                            
-                            console.log(`[IA] Cota excedida. Aguardando ${delay/1000}s para tentar novamente...`);
-                            await new Promise(r => setTimeout(r, delay));
-                            return generateWithRetry(retries - 1);
-                        }
-                        throw err;
-                    }
-                };
 
-                const response = await generateWithRetry();
-                await msg.reply(response.text);
+            try {
+                const provider = aiConfig.provider || 'gemini';
+                console.log(`[IA] Usando provedor: ${provider}`);
+                
+                let finalText = "";
+
+                if (provider === 'groq') {
+                    // --- GROQ LOGIC ---
+                    const groqKey = aiConfig.apiKeys?.groq || process.env.GROQ_API_KEY;
+                    if (!groqKey) throw new Error("API Key da Groq não configurada");
+                    
+                    const groq = new Groq({ apiKey: groqKey });
+                    const userMessage = msg.hasMedia ? "Enviou uma mídia (não suportada pela Groq no momento)" : (msg.body || "");
+                    
+                    const chatCompletion = await groq.chat.completions.create({
+                        messages: [
+                            { role: "system", content: systemInstruction + contextData },
+                            { role: "user", content: userMessage }
+                        ],
+                        model: aiConfig.model || "llama-3.1-8b-instant",
+                        temperature: aiConfig.temperature || 0.7,
+                        max_completion_tokens: 1024,
+                        top_p: 1,
+                        stream: true,
+                        stop: null
+                    });
+
+                    // Accumulate stream
+                    for await (const chunk of chatCompletion) {
+                        finalText += chunk.choices[0]?.delta?.content || '';
+                    }
+
+                } else {
+                    // --- GEMINI LOGIC (DEFAULT) ---
+                    let promptParts = [];
+                    if (msg.hasMedia) {
+                        try {
+                            const media = await msg.downloadMedia();
+                            if (media) promptParts.push({ inlineData: { mimeType: media.mimetype, data: media.data } });
+                        } catch (e) { }
+                    }
+                    if (msg.body) promptParts.push({ text: msg.body });
+                    
+                    const geminiKey = aiConfig.apiKeys?.gemini || process.env.API_KEY;
+                    const ai = new GoogleGenAI({ apiKey: geminiKey });
+                    
+                    const generateWithRetry = async (retries = 3) => {
+                        try {
+                            const model = ai.models.generateContent({ 
+                                model: aiConfig.model || 'gemini-2.5-flash',
+                                contents: { role: 'user', parts: promptParts },
+                                config: { systemInstruction: systemInstruction + contextData, temperature: aiConfig.temperature || 0.7 }
+                            });
+                            return await model;
+                        } catch (err) {
+                            if (retries > 0 && (err.status === 429 || err.message?.includes('429') || err.message?.includes('Quota'))) {
+                                let delay = 30000;
+                                const match = err.message?.match(/retry in ([0-9.]+)s/);
+                                if (match) delay = Math.ceil(parseFloat(match[1]) * 1000) + 1000;
+                                console.log(`[IA] Cota excedida. Aguardando ${delay/1000}s para tentar novamente...`);
+                                await new Promise(r => setTimeout(r, delay));
+                                return generateWithRetry(retries - 1);
+                            }
+                            throw err;
+                        }
+                    };
+                    const response = await generateWithRetry();
+                    finalText = response.text;
+                }
+
+                if (finalText) {
+                    await msg.reply(finalText);
+                }
+
             } catch (error) { 
                 console.error("Erro IA Final:", error.message || error); 
             }
@@ -544,12 +606,15 @@ function startCampaignSending(campaignId, message) {
 
 // --- API ROUTES ---
 app.post('/api/config/ai-rules', (req, res) => {
-  const { rules, persona, temperature, model, aiActive } = req.body;
+  const { rules, persona, temperature, model, aiActive, provider, apiKeys } = req.body;
   if (rules !== undefined) aiConfig.knowledgeRules = rules;
   if (persona !== undefined) aiConfig.persona = persona;
   if (temperature !== undefined) aiConfig.temperature = temperature;
   if (model !== undefined) aiConfig.model = model;
   if (aiActive !== undefined) aiConfig.aiActive = aiActive;
+  if (provider !== undefined) aiConfig.provider = provider;
+  if (apiKeys !== undefined) aiConfig.apiKeys = { ...aiConfig.apiKeys, ...apiKeys };
+  
   try { fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(aiConfig, null, 2)); res.json({ success: true }); } 
   catch (e) { res.status(500).json({ error: "Falha ao salvar" }); }
 });

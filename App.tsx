@@ -4,7 +4,7 @@ import {
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
   BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
-  ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check
+  ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -343,6 +343,30 @@ const SelectedLeadModal = ({ company, onClose, onGoToChat }: any) => {
     )
 }
 
+const ApiKeyInput = ({ label, provider, currentKey, onChange, activeProvider }: any) => {
+    const [show, setShow] = useState(false);
+    return (
+        <div className={`p-4 rounded-xl border transition-all ${activeProvider === provider ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-200'}`}>
+            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center justify-between">
+                <span>{label}</span>
+                {activeProvider === provider && <span className="text-xs font-bold text-brand-600 px-2 py-0.5 bg-white rounded-full border border-brand-100">ATIVO</span>}
+            </label>
+            <div className="relative">
+                <input 
+                    type={show ? "text" : "password"}
+                    className="input-premium pr-10"
+                    value={currentKey || ''}
+                    onChange={(e) => onChange(provider, e.target.value)}
+                    placeholder={`Cole sua API Key do ${label}...`}
+                />
+                <button onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {show ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+            </div>
+        </div>
+    );
+};
+
 // --- MAIN APP COMPONENT ---
 
 const App: React.FC = () => {
@@ -392,6 +416,8 @@ const App: React.FC = () => {
   // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
     model: 'gemini-2.5-flash',
+    provider: 'gemini',
+    apiKeys: { gemini: '', groq: '' },
     persona: DEFAULT_AI_PERSONA,
     knowledgeRules: [],
     temperature: 0.7,
@@ -489,7 +515,9 @@ const App: React.FC = () => {
                   persona: newConfig.persona,
                   temperature: newConfig.temperature,
                   model: newConfig.model,
-                  aiActive: newConfig.aiActive
+                  aiActive: newConfig.aiActive,
+                  provider: newConfig.provider,
+                  apiKeys: newConfig.apiKeys
               })
           });
           setAiConfig(newConfig);
@@ -1434,8 +1462,76 @@ const App: React.FC = () => {
                    <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
                    
                    <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
+                       
+                       <div className="space-y-6">
+                           <div className="grid grid-cols-2 gap-4 mb-4">
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'gemini' 
+                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
+                                   <span className="font-bold">Google Gemini</span>
+                               </button>
+
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'groq' 
+                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
+                                   <span className="font-bold">Groq (Llama 3)</span>
+                               </button>
+                           </div>
+
+                           {aiConfig.provider === 'gemini' && (
+                               <ApiKeyInput 
+                                   label="Google Gemini" 
+                                   provider="gemini"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.gemini}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+
+                           {aiConfig.provider === 'groq' && (
+                               <ApiKeyInput 
+                                   label="Groq Cloud" 
+                                   provider="groq"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.groq}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8">
                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
                        <div className="space-y-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
+                               <input 
+                                  className="input-premium"
+                                  value={aiConfig.model}
+                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
+                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-2.5-flash" : "llama-3.1-8b-instant"}
+                               />
+                           </div>
+
                            <div>
                                <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
                                <textarea 
