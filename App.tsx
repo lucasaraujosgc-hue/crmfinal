@@ -431,6 +431,8 @@ const App: React.FC = () => {
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   // Initial Load
   useEffect(() => {
@@ -506,8 +508,9 @@ const App: React.FC = () => {
   }
 
   const saveAiConfig = async (newConfig: AIConfig) => {
+      setIsSavingConfig(true);
       try {
-          await fetch('/api/config/ai-rules', {
+          const res = await fetch('/api/config/ai-rules', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -517,11 +520,23 @@ const App: React.FC = () => {
                   model: newConfig.model,
                   aiActive: newConfig.aiActive,
                   provider: newConfig.provider,
-                  apiKeys: newConfig.apiKeys
+                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
               })
           });
-          setAiConfig(newConfig);
-      } catch (e) { console.error(e); alert('Erro ao salvar configurações'); }
+          
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
+              alert('Configurações salvas e aplicadas com sucesso!');
+          } else {
+              alert('Erro ao salvar no servidor.');
+          }
+      } catch (e) { 
+          console.error(e); 
+          alert('Erro de conexão ao salvar configurações'); 
+      } finally {
+          setIsSavingConfig(false);
+      }
   }
 
   const cleanupOrphanedData = async () => {
@@ -1345,7 +1360,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-           {/* ... (Other settings tabs remain the same) ... */}
            {activeTab === 'knowledge' && (
               <div className="max-w-4xl mx-auto space-y-6">
                  <div className="flex justify-between items-center">
@@ -1585,8 +1599,13 @@ const App: React.FC = () => {
                    </div>
 
                    <div className="flex justify-end">
-                       <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary flex items-center gap-2">
-                           <Save size={18}/> Salvar Alterações
+                       <button 
+                           onClick={() => saveAiConfig(aiConfig)} 
+                           disabled={isSavingConfig}
+                           className="btn-primary flex items-center gap-2"
+                       >
+                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
+                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
                        </button>
                    </div>
                </div>

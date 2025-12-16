@@ -128,6 +128,7 @@ if (fs.existsSync(AI_CONFIG_PATH)) {
     try {
         const savedConfig = JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf8'));
         aiConfig = { ...aiConfig, ...savedConfig };
+        console.log("[Config] Configuração carregada do disco.");
     } catch (e) {
         console.error("Erro ao carregar ai-config.json", e);
     }
@@ -399,13 +400,25 @@ client.on('qr', (qr) => QRCode.toDataURL(qr, (err, url) => qrCodeData = url));
 client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = true; qrCodeData = null; });
 
 client.on('message', async (msg) => {
-    // 1. FILTROS BÁSICOS DE SEGURANÇA E TIPO
-    if (msg.fromMe || !aiConfig.aiActive) return;
-    if (msg.from.includes('@g.us')) return; 
-    if (msg.from.includes('status@broadcast')) return;
-
     const rawPhone = msg.from.replace(/\D/g, '');
     const phoneSuffix = rawPhone.slice(-8);
+    console.log(`[WhatsApp] Mensagem recebida de ${msg.from} (${phoneSuffix})`);
+
+    // 1. FILTROS BÁSICOS DE SEGURANÇA E TIPO
+    if (msg.fromMe) return; // Ignora mensagens enviadas por mim
+    
+    // Filtros de Grupo/Broadcast
+    if (msg.from.includes('@g.us')) {
+        console.log(`[WhatsApp] Ignorando grupo: ${msg.from}`);
+        return; 
+    }
+    if (msg.from.includes('status@broadcast')) return;
+
+    // 2. CHECK GLOBAL AI ACTIVE
+    if (!aiConfig.aiActive) {
+        console.log(`[IA] Ignorada: IA Global está desativada.`);
+        return;
+    }
 
     db.get(`SELECT * FROM resultado WHERE telefone LIKE ? ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix}`], async (err, company) => {
             if (err) {
@@ -413,11 +426,19 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // 2. VERIFICAÇÃO RIGOROSA
-            if (!company) return; 
+            // 3. VERIFICAÇÃO RIGOROSA: Se não achar no banco, PARE.
+            if (!company) {
+                console.log(`[IA] Ignorada: Número ${phoneSuffix} não encontrado no banco de dados.`);
+                return; 
+            }
 
-            // 3. VERIFICAÇÃO DE TOGGLE INDIVIDUAL
-            if (company.ai_active === 0) return;
+            // 4. VERIFICAÇÃO DE TOGGLE INDIVIDUAL
+            if (company.ai_active === 0) {
+                 console.log(`[IA] Ignorada: IA desativada especificamente para ${company.razao_social}.`);
+                 return;
+            }
+
+            console.log(`[IA] Processando resposta para: ${company.razao_social}`);
 
             // --- INÍCIO DO PROCESSO DE RESPOSTA DA IA ---
             let systemInstruction = aiConfig.persona;
@@ -450,25 +471,31 @@ client.on('message', async (msg) => {
 
             try {
                 const provider = aiConfig.provider || 'gemini';
-                console.log(`[IA] Usando provedor: ${provider}`);
+                console.log(`[IA] Usando provedor: ${provider} | Modelo: ${aiConfig.model}`);
                 
                 let finalText = "";
 
                 if (provider === 'groq') {
                     // --- GROQ LOGIC ---
                     const groqKey = aiConfig.apiKeys?.groq || process.env.GROQ_API_KEY;
-                    if (!groqKey) throw new Error("API Key da Groq não configurada");
+                    if (!groqKey) {
+                        console.error("[IA] Erro: API Key da Groq não configurada.");
+                        return;
+                    }
                     
                     const groq = new Groq({ apiKey: groqKey });
                     const userMessage = msg.hasMedia ? "Enviou uma mídia (não suportada pela Groq no momento)" : (msg.body || "");
                     
+                    // Nota: Groq espera que a mensagem de sistema esteja na array de messages, não num campo 'system' separado
+                    const messages = [
+                        { role: "system", content: systemInstruction + contextData },
+                        { role: "user", content: userMessage }
+                    ];
+
                     const chatCompletion = await groq.chat.completions.create({
-                        messages: [
-                            { role: "system", content: systemInstruction + contextData },
-                            { role: "user", content: userMessage }
-                        ],
-                        model: aiConfig.model || "llama-3.1-8b-instant",
-                        temperature: aiConfig.temperature || 0.7,
+                        messages: messages,
+                        model: aiConfig.model || "llama-3.1-8b-instant", // Modelo fixo conforme solicitado se não houver config
+                        temperature: aiConfig.temperature || 1,
                         max_completion_tokens: 1024,
                         top_p: 1,
                         stream: true,
@@ -477,7 +504,8 @@ client.on('message', async (msg) => {
 
                     // Accumulate stream
                     for await (const chunk of chatCompletion) {
-                        finalText += chunk.choices[0]?.delta?.content || '';
+                        const content = chunk.choices[0]?.delta?.content || '';
+                        finalText += content;
                     }
 
                 } else {
@@ -492,6 +520,11 @@ client.on('message', async (msg) => {
                     if (msg.body) promptParts.push({ text: msg.body });
                     
                     const geminiKey = aiConfig.apiKeys?.gemini || process.env.API_KEY;
+                    if (!geminiKey) {
+                        console.error("[IA] Erro: API Key da Gemini não configurada.");
+                        return;
+                    }
+
                     const ai = new GoogleGenAI({ apiKey: geminiKey });
                     
                     const generateWithRetry = async (retries = 3) => {
@@ -519,7 +552,10 @@ client.on('message', async (msg) => {
                 }
 
                 if (finalText) {
+                    console.log(`[IA] Resposta gerada (${finalText.length} chars). Enviando...`);
                     await msg.reply(finalText);
+                } else {
+                    console.log("[IA] Resposta vazia gerada.");
                 }
 
             } catch (error) { 
@@ -607,16 +643,36 @@ function startCampaignSending(campaignId, message) {
 // --- API ROUTES ---
 app.post('/api/config/ai-rules', (req, res) => {
   const { rules, persona, temperature, model, aiActive, provider, apiKeys } = req.body;
+  
+  console.log(`[Config Update] Recebido: Active=${aiActive}, Provider=${provider}, Model=${model}`);
+  
   if (rules !== undefined) aiConfig.knowledgeRules = rules;
   if (persona !== undefined) aiConfig.persona = persona;
   if (temperature !== undefined) aiConfig.temperature = temperature;
   if (model !== undefined) aiConfig.model = model;
   if (aiActive !== undefined) aiConfig.aiActive = aiActive;
   if (provider !== undefined) aiConfig.provider = provider;
-  if (apiKeys !== undefined) aiConfig.apiKeys = { ...aiConfig.apiKeys, ...apiKeys };
   
-  try { fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(aiConfig, null, 2)); res.json({ success: true }); } 
-  catch (e) { res.status(500).json({ error: "Falha ao salvar" }); }
+  // MERGE CUIDADOSO DE API KEYS
+  if (apiKeys) {
+      aiConfig.apiKeys = {
+          ...aiConfig.apiKeys,
+          ...apiKeys
+      };
+      // Log mascarado para debug
+      if(apiKeys.gemini) console.log("Key Gemini atualizada: " + apiKeys.gemini.substring(0,5) + "...");
+      if(apiKeys.groq) console.log("Key Groq atualizada: " + apiKeys.groq.substring(0,5) + "...");
+  }
+  
+  try { 
+      fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(aiConfig, null, 2)); 
+      console.log("[Config Update] Salvo no disco com sucesso.");
+      res.json({ success: true, config: aiConfig }); 
+  } 
+  catch (e) { 
+      console.error("[Config Update] Erro ao salvar:", e);
+      res.status(500).json({ error: "Falha ao salvar" }); 
+  }
 });
 
 app.get('/api/config', (req, res) => res.json(aiConfig));
