@@ -401,33 +401,33 @@ client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = tru
 
 client.on('message', async (msg) => {
     // 1. TENTATIVA ROBUSTA DE IDENTIFICAÇÃO DO NÚMERO
-    // Corrige problema do @lid (Linked Devices) onde o ID não é o telefone
+    // Utilizamos msg.getChat() pois em chats privados, o chat.id.user SEMPRE é o número de telefone (@c.us),
+    // mesmo que o msg.from seja um dispositivo vinculado (@lid)
     let senderNumber = "";
     
     try {
-        const contact = await msg.getContact();
-        if (contact) {
-            // Prioridade 1: contact.number (Ex: 557399998888)
-            // Prioridade 2: contact.id.user
-            senderNumber = contact.number || contact.id.user || "";
+        const chat = await msg.getChat();
+        
+        // Filtro de Grupo: Ignorar mensagens vindas de grupos
+        if (chat.isGroup) {
+             // Opcional: console.log(`[WhatsApp] Ignorando grupo: ${chat.name}`);
+             return; 
         }
+        
+        // Em chats privados (1:1), chat.id.user é o número real do contato.
+        senderNumber = chat.id.user; 
+        
     } catch(e) {
-        console.log("[WhatsApp] Falha ao obter contato, usando ID bruto:", e.message);
-    }
-    
-    // Fallback se falhar getContact ou se vier vazio
-    if (!senderNumber) {
+        console.log("[WhatsApp] Falha ao obter chat (fallback):", e.message);
+        // Fallback apenas se getChat falhar
         senderNumber = msg.from.replace(/\D/g, '');
-    } else {
-        senderNumber = senderNumber.replace(/\D/g, '');
     }
 
-    const phoneSuffix = senderNumber.slice(-8);
-    console.log(`[WhatsApp] Mensagem de ${msg.from} -> Resolvido: ${senderNumber} (Sufixo: ${phoneSuffix})`);
+    const phoneSuffix = senderNumber.replace(/\D/g, '').slice(-8);
+    console.log(`[WhatsApp] Mensagem recebida de ${msg.from} -> Resolvido: ${senderNumber} (Sufixo: ${phoneSuffix})`);
 
     // 2. FILTROS BÁSICOS DE SEGURANÇA E TIPO
-    if (msg.fromMe) return; 
-    if (msg.from.includes('@g.us')) return; // Ignora grupos
+    if (msg.fromMe) return; // Ignora mensagens enviadas por mim
     if (msg.from.includes('status@broadcast')) return;
 
     // 3. CHECK GLOBAL AI ACTIVE
