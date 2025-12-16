@@ -1481,7 +1481,7 @@ const App: React.FC = () => {
                        <div className="space-y-6">
                            <div className="grid grid-cols-2 gap-4 mb-4">
                                <button 
-                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini'})}
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-2.5-flash'})}
                                    className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
                                        aiConfig.provider === 'gemini' 
                                        ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
@@ -1493,7 +1493,7 @@ const App: React.FC = () => {
                                </button>
 
                                <button 
-                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq'})}
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
                                    className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
                                        aiConfig.provider === 'groq' 
                                        ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 

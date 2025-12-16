@@ -471,18 +471,27 @@ client.on('message', async (msg) => {
 
             try {
                 const provider = aiConfig.provider || 'gemini';
-                console.log(`[IA] Usando provedor: ${provider} | Modelo: ${aiConfig.model}`);
+                console.log(`[IA] Usando provedor: ${provider} | Modelo Configurado: ${aiConfig.model}`);
                 
                 let finalText = "";
 
                 if (provider === 'groq') {
                     // --- GROQ LOGIC ---
-                    const groqKey = aiConfig.apiKeys?.groq || process.env.GROQ_API_KEY;
+                    const groqKey = (aiConfig.apiKeys?.groq || process.env.GROQ_API_KEY || "").trim();
+                    
                     if (!groqKey) {
                         console.error("[IA] Erro: API Key da Groq não configurada.");
                         return;
                     }
-                    
+                    console.log(`[IA] Key Groq (final): ${groqKey.slice(-4)}`); // Debug Key
+
+                    // SAFETY CHECK FOR MODEL NAME
+                    let modelToUse = aiConfig.model || "llama-3.1-8b-instant";
+                    if (modelToUse.toLowerCase().startsWith('gemini')) {
+                        console.warn(`[IA] AVISO: Modelo '${modelToUse}' incompatível com Groq. Forçando 'llama-3.1-8b-instant'.`);
+                        modelToUse = "llama-3.1-8b-instant";
+                    }
+
                     const groq = new Groq({ apiKey: groqKey });
                     const userMessage = msg.hasMedia ? "Enviou uma mídia (não suportada pela Groq no momento)" : (msg.body || "");
                     
@@ -494,7 +503,7 @@ client.on('message', async (msg) => {
 
                     const chatCompletion = await groq.chat.completions.create({
                         messages: messages,
-                        model: aiConfig.model || "llama-3.1-8b-instant", // Modelo fixo conforme solicitado se não houver config
+                        model: modelToUse, 
                         temperature: aiConfig.temperature || 1,
                         max_completion_tokens: 1024,
                         top_p: 1,
@@ -519,7 +528,7 @@ client.on('message', async (msg) => {
                     }
                     if (msg.body) promptParts.push({ text: msg.body });
                     
-                    const geminiKey = aiConfig.apiKeys?.gemini || process.env.API_KEY;
+                    const geminiKey = (aiConfig.apiKeys?.gemini || process.env.API_KEY || "").trim();
                     if (!geminiKey) {
                         console.error("[IA] Erro: API Key da Gemini não configurada.");
                         return;
@@ -560,6 +569,7 @@ client.on('message', async (msg) => {
 
             } catch (error) { 
                 console.error("Erro IA Final:", error.message || error); 
+                console.error("Stack:", error.stack);
             }
         }
     );
