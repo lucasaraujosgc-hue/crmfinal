@@ -400,21 +400,37 @@ client.on('qr', (qr) => QRCode.toDataURL(qr, (err, url) => qrCodeData = url));
 client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = true; qrCodeData = null; });
 
 client.on('message', async (msg) => {
-    const rawPhone = msg.from.replace(/\D/g, '');
-    const phoneSuffix = rawPhone.slice(-8);
-    console.log(`[WhatsApp] Mensagem recebida de ${msg.from} (${phoneSuffix})`);
-
-    // 1. FILTROS BÁSICOS DE SEGURANÇA E TIPO
-    if (msg.fromMe) return; // Ignora mensagens enviadas por mim
+    // 1. TENTATIVA ROBUSTA DE IDENTIFICAÇÃO DO NÚMERO
+    // Corrige problema do @lid (Linked Devices) onde o ID não é o telefone
+    let senderNumber = "";
     
-    // Filtros de Grupo/Broadcast
-    if (msg.from.includes('@g.us')) {
-        console.log(`[WhatsApp] Ignorando grupo: ${msg.from}`);
-        return; 
+    try {
+        const contact = await msg.getContact();
+        if (contact) {
+            // Prioridade 1: contact.number (Ex: 557399998888)
+            // Prioridade 2: contact.id.user
+            senderNumber = contact.number || contact.id.user || "";
+        }
+    } catch(e) {
+        console.log("[WhatsApp] Falha ao obter contato, usando ID bruto:", e.message);
     }
+    
+    // Fallback se falhar getContact ou se vier vazio
+    if (!senderNumber) {
+        senderNumber = msg.from.replace(/\D/g, '');
+    } else {
+        senderNumber = senderNumber.replace(/\D/g, '');
+    }
+
+    const phoneSuffix = senderNumber.slice(-8);
+    console.log(`[WhatsApp] Mensagem de ${msg.from} -> Resolvido: ${senderNumber} (Sufixo: ${phoneSuffix})`);
+
+    // 2. FILTROS BÁSICOS DE SEGURANÇA E TIPO
+    if (msg.fromMe) return; 
+    if (msg.from.includes('@g.us')) return; // Ignora grupos
     if (msg.from.includes('status@broadcast')) return;
 
-    // 2. CHECK GLOBAL AI ACTIVE
+    // 3. CHECK GLOBAL AI ACTIVE
     if (!aiConfig.aiActive) {
         console.log(`[IA] Ignorada: IA Global está desativada.`);
         return;
@@ -426,13 +442,13 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // 3. VERIFICAÇÃO RIGOROSA: Se não achar no banco, PARE.
+            // 4. VERIFICAÇÃO RIGOROSA: Se não achar no banco, PARE.
             if (!company) {
-                console.log(`[IA] Ignorada: Número ${phoneSuffix} não encontrado no banco de dados.`);
+                console.log(`[IA] Ignorada: Número ${phoneSuffix} (ID Real: ${senderNumber}) não encontrado no banco.`);
                 return; 
             }
 
-            // 4. VERIFICAÇÃO DE TOGGLE INDIVIDUAL
+            // 5. VERIFICAÇÃO DE TOGGLE INDIVIDUAL
             if (company.ai_active === 0) {
                  console.log(`[IA] Ignorada: IA desativada especificamente para ${company.razao_social}.`);
                  return;
