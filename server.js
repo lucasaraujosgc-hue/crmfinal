@@ -401,34 +401,26 @@ client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = tru
 
 client.on('message', async (msg) => {
     // 1. TENTATIVA ROBUSTA DE IDENTIFICAÇÃO DO NÚMERO
-    // Utilizamos msg.getChat() pois em chats privados, o chat.id.user SEMPRE é o número de telefone (@c.us),
-    // mesmo que o msg.from seja um dispositivo vinculado (@lid)
+    // Utilizamos msg.id.remote que geralmente contém o JID canônico do chat (ex: 5573...@c.us)
+    // diferentemente de msg.from que pode ser o dispositivo (@lid)
     let senderNumber = "";
     
-    try {
-        const chat = await msg.getChat();
-        
-        // Filtro de Grupo: Ignorar mensagens vindas de grupos
-        if (chat.isGroup) {
-             // Opcional: console.log(`[WhatsApp] Ignorando grupo: ${chat.name}`);
-             return; 
-        }
-        
-        // Em chats privados (1:1), chat.id.user é o número real do contato.
-        senderNumber = chat.id.user; 
-        
-    } catch(e) {
-        console.log("[WhatsApp] Falha ao obter chat (fallback):", e.message);
-        // Fallback apenas se getChat falhar
+    // Tenta usar remote se estiver disponível e for um c.us (chat padrão)
+    if (msg.id && msg.id.remote && msg.id.remote.includes('@c.us')) {
+        senderNumber = msg.id.remote.replace(/\D/g, '');
+        console.log(`[WhatsApp] Resolvido via remote: ${senderNumber} (Original: ${msg.from})`);
+    } else {
+        // Fallback: se remote não ajudar, tentamos from (pode ser lid, mas é o que tem)
         senderNumber = msg.from.replace(/\D/g, '');
+        console.log(`[WhatsApp] Resolvido via from (Fallback): ${senderNumber}`);
     }
 
-    const phoneSuffix = senderNumber.replace(/\D/g, '').slice(-8);
-    console.log(`[WhatsApp] Mensagem recebida de ${msg.from} -> Resolvido: ${senderNumber} (Sufixo: ${phoneSuffix})`);
+    const phoneSuffix = senderNumber.slice(-8);
 
     // 2. FILTROS BÁSICOS DE SEGURANÇA E TIPO
-    if (msg.fromMe) return; // Ignora mensagens enviadas por mim
+    if (msg.fromMe) return; 
     if (msg.from.includes('status@broadcast')) return;
+    if (msg.from.includes('@g.us')) return; // Grupos
 
     // 3. CHECK GLOBAL AI ACTIVE
     if (!aiConfig.aiActive) {
@@ -444,7 +436,7 @@ client.on('message', async (msg) => {
 
             // 4. VERIFICAÇÃO RIGOROSA: Se não achar no banco, PARE.
             if (!company) {
-                console.log(`[IA] Ignorada: Número ${phoneSuffix} (ID Real: ${senderNumber}) não encontrado no banco.`);
+                console.log(`[IA] Ignorada: Número ${phoneSuffix} (ID Resolvido: ${senderNumber}) não encontrado no banco.`);
                 return; 
             }
 
