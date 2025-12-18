@@ -4,9 +4,11 @@ import {
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
   BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
-  ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu,
-  Filter, ChevronRight, Hash, ExternalLink
+  ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu
 } from 'lucide-react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
 import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -19,14 +21,22 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
       if (typeof window === 'undefined') return initialValue;
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
-    } catch (error) { return initialValue; }
+    } catch (error) {
+      console.warn(error);
+      return initialValue;
+    }
   });
+
   const setValue = (value: T | ((val: T) => T)) => {
     try {
       const valueToStore = value instanceof Function ? value(storedValue) : value;
       setStoredValue(valueToStore);
-      if (typeof window !== 'undefined') window.localStorage.setItem(key, JSON.stringify(valueToStore));
-    } catch (error) {}
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+      }
+    } catch (error) {
+      console.warn(error);
+    }
   };
   return [storedValue, setValue];
 }
@@ -42,10 +52,12 @@ function useInterval(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
-// --- Helpers ---
+// --- HELPERS ---
 
+// Limpa o motivo removendo o endereço de correspondência
 const cleanReasonText = (text: string | null | undefined) => {
     if (!text) return '';
+    // Corta nas palavras chaves comuns de endereço da SEFAZ
     return text.split('Endereço de Correspondência')[0]
                .split('Endereço:')[0]
                .split('Endereco de Correspondencia')[0]
@@ -54,573 +66,1553 @@ const cleanReasonText = (text: string | null | undefined) => {
 
 const formatTime = (timestamp: number) => {
     if (!timestamp) return '';
-    return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 const getInitials = (name: string) => {
-  if (!name) return '?';
-  const parts = name.trim().split(' ').filter(p => p.length > 0);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+    return name
+        .split(' ')
+        .map(n => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase();
 };
 
-// --- Components ---
+// --- EXTRACTED COMPONENTS ---
 
-const StatusBadge = ({ status }: { status: string }) => {
-    const map: Record<string, string> = { 
-      'pending': 'bg-slate-100 text-slate-600', 
-      'queued': 'bg-amber-100 text-amber-700', 
-      'sent': 'bg-blue-100 text-blue-700', 
-      'replied': 'bg-purple-100 text-purple-700', 
-      'interested': 'bg-emerald-100 text-emerald-700', 
-      'not_interested': 'bg-rose-100 text-rose-700', 
-      'error': 'bg-red-100 text-red-700', 
-      'skipped': 'bg-gray-100 text-gray-500' 
-    };
-    const labels: Record<string, string> = { 
-      'pending': 'Pendente', 
-      'queued': 'Na Fila', 
-      'sent': 'Enviado', 
-      'replied': 'Respondeu', 
-      'interested': 'Interessado', 
-      'not_interested': 'Descartado', 
-      'error': 'Erro', 
-      'skipped': 'Sem Zap' 
-    };
-    return <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${map[status] || map['pending']}`}>{labels[status] || status}</span>;
-}
+const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
+  <div className="card-premium p-4 flex flex-col gap-4 mb-6">
+    <div className="flex flex-col md:flex-row gap-4">
+      <div className="flex-1 relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+        <input 
+          type="text" 
+          placeholder="Buscar por Nome, IE ou CNPJ..." 
+          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+          value={filters.search}
+          onChange={e => setFilters((prev: any) => ({...prev, search: e.target.value}))}
+        />
+      </div>
+      <button onClick={onRefresh} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><RefreshCw size={20} /></button>
+    </div>
 
-const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh, compact = false }: any) => (
-  <div className={`card-premium ${compact ? 'p-4' : 'p-5'} flex flex-col gap-4 mb-6 animate-fade-in shadow-sm border-slate-200/60 bg-white`}>
-    {!compact && (
-      <div className="flex flex-col lg:flex-row gap-4 items-center">
-        <div className="flex-1 w-full relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Buscar por Razão Social, CNPJ ou IE..." 
-            className="input-premium pl-12 h-12" 
-            value={filters.search} 
-            onChange={e => setFilters((p: any) => ({...p, search: e.target.value}))} 
-          />
-        </div>
-        <div className="flex gap-2 w-full lg:w-auto">
-          <button onClick={onRefresh} className="btn-secondary h-12 px-4 flex items-center gap-2">
-            <RefreshCw size={18} className="text-brand-600" />
-            <span className="hidden sm:inline">Atualizar</span>
-          </button>
-        </div>
-      </div>
-    )}
-    
-    <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${compact ? 'lg:grid-cols-5' : 'lg:grid-cols-6'} gap-3`}>
-      {compact && (
-        <div className="space-y-1">
-          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Busca</label>
-          <input 
-            type="text" 
-            className="input-premium py-2 text-xs h-10" 
-            placeholder="IE, CNPJ ou Nome..."
-            value={filters.search} 
-            onChange={e => setFilters((p: any) => ({...p, search: e.target.value}))} 
-          />
-        </div>
-      )}
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Cidade</label>
-        <select className="input-premium py-2 text-xs h-10" value={filters.city} onChange={e => setFilters((p: any) => ({...p, city: e.target.value}))}>
-          <option value="">Todas Cidades</option>
-          {availableCities.map((c: string) => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </div>
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Motivo SEFAZ</label>
-        <select className="input-premium py-2 text-xs h-10" value={filters.reason} onChange={e => setFilters((p: any) => ({...p, reason: e.target.value}))}>
-          <option value="">Todos Motivos</option>
-          {availableReasons.map((r: string) => <option key={r} value={r}>{r}</option>)}
-        </select>
-      </div>
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Status WA</label>
-        <select className="input-premium py-2 text-xs h-10" value={filters.statusWa} onChange={e => setFilters((p: any) => ({...p, statusWa: e.target.value}))}>
-          <option value="all">Todos Status</option>
-          <option value="pending">Pendente</option>
-          <option value="queued">Na Fila</option>
-          <option value="sent">Enviado</option>
-          <option value="replied">Respondeu</option>
-          <option value="error">Erro</option>
-        </select>
-      </div>
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Telefone</label>
-        <select className="input-premium py-2 text-xs h-10" value={filters.hasPhone} onChange={e => setFilters((p: any) => ({...p, hasPhone: e.target.value}))}>
-          <option value="all">Qualquer</option>
-          <option value="yes">Com Telefone</option>
-          <option value="no">Sem Telefone</option>
-        </select>
-      </div>
-      {!compact && (
-        <div className="space-y-1">
-          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Contador</label>
-          <select className="input-premium py-2 text-xs h-10" value={filters.hasAccountant} onChange={e => setFilters((p: any) => ({...p, hasAccountant: e.target.value}))}>
-            <option value="all">Qualquer</option>
-            <option value="yes">Com Contador</option>
-            <option value="no">Sem Contador</option>
-          </select>
-        </div>
-      )}
-      <div className="flex items-end">
-        <button 
-          onClick={() => setFilters({ search: '', city: '', reason: '', hasAccountant: 'all', status: 'all', statusWa: 'all', hasPhone: 'all' })}
-          className="text-[10px] font-bold text-rose-500 hover:text-rose-600 uppercase w-full pb-3 text-center"
-        >
-          Limpar
-        </button>
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <select className="input-premium py-2 text-sm" value={filters.city} onChange={e => setFilters((prev: any) => ({...prev, city: e.target.value}))}>
+        <option value="">Todas as Cidades</option>
+        {availableCities.map((c: string) => <option key={c} value={c}>{c}</option>)}
+      </select>
+
+      <select className="input-premium py-2 text-sm" value={filters.reason} onChange={e => setFilters((prev: any) => ({...prev, reason: e.target.value}))}>
+        <option value="">Todos os Motivos</option>
+        {availableReasons.map((r: string) => <option key={r} value={r}>{r}</option>)}
+      </select>
+
+      <select className="input-premium py-2 text-sm" value={filters.statusWa} onChange={e => setFilters((prev: any) => ({...prev, statusWa: e.target.value}))}>
+        <option value="all">Status WhatsApp: Todos</option>
+        <option value="pending">Pendente</option>
+        <option value="queued">Fila de Envio</option>
+        <option value="sent">Enviado</option>
+        <option value="replied">Respondeu</option>
+        <option value="interested">Interessado</option>
+        <option value="not_interested">Descartado</option>
+        <option value="error">Erro</option>
+      </select>
+
+      <select className="input-premium py-2 text-sm" value={filters.hasAccountant} onChange={e => setFilters((prev: any) => ({...prev, hasAccountant: e.target.value}))}>
+        <option value="all">Contador: Todos</option>
+        <option value="yes">Com Contador</option>
+        <option value="no">Sem Contador</option>
+      </select>
+
+      <select className="input-premium py-2 text-sm" value={filters.hasPhone} onChange={e => setFilters((prev: any) => ({...prev, hasPhone: e.target.value}))}>
+        <option value="all">Telefone: Todos</option>
+        <option value="yes">Com Telefone</option>
+        <option value="no">Sem Telefone</option>
+      </select>
     </div>
   </div>
 ));
 
 const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi }: any) => (
-  <div className="card-premium overflow-hidden bg-white shadow-sm">
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm text-left">
-        <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b">
+    <div className="card-premium overflow-hidden relative">
+      <table className="w-full text-sm text-left mt-2">
+        <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
           <tr>
-            {selectable && <th className="px-4 py-5 w-10 text-center">
-              <button onClick={toggleSelectAll}>
-                {selectedIds.size === companies.length && companies.length > 0 ? <CheckSquare size={18} className="text-brand-600" /> : <Square size={18} />}
-              </button>
-            </th>}
-            <th className="px-6 py-5">Empresa / Documentos</th>
-            <th className="px-6 py-5">Situação</th>
-            <th className="px-6 py-5">Status WA</th>
-            {onToggleAi && <th className="px-6 py-5 text-center">IA</th>}
-            <th className="px-6 py-5">Motivo / Local</th>
+            {selectable && (
+              <th className="px-4 py-4 w-10 text-center">
+                  <button onClick={toggleSelectAll} className="hover:text-brand-600">
+                  {selectedIds.size === companies.length && companies.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
+                  </button>
+              </th>
+            )}
+            <th className="px-6 py-4 w-[350px]">Empresa</th>
+            <th className="px-6 py-4">Situação</th>
+            <th className="px-6 py-4">Status WhatsApp</th>
+            <th className="px-6 py-4 text-center">IA Ativa</th>
+            <th className="px-6 py-4">Motivo</th>
+            <th className="px-6 py-4">Município</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {companies.map((c: CompanyResult) => (
-            <tr key={c.id} className={`hover:bg-brand-50/20 transition-colors ${selectedIds.has(c.id) ? 'bg-brand-50/40' : ''}`}>
-              {selectable && <td className="px-4 py-4 text-center">
-                <button onClick={() => toggleSelection(c.id)}>
-                   {selectedIds.has(c.id) ? <CheckSquare size={18} className="text-brand-600" /> : <Square size={18} className="text-slate-300" />}
-                </button>
-              </td>}
+          {companies.slice(0, 100).map((company: CompanyResult) => (
+            <tr key={company.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(company.id) ? 'bg-brand-50/30' : ''}`}>
+              {selectable && (
+                  <td className="px-4 py-4 text-center">
+                  <button onClick={() => toggleSelection(company.id)} className={`${selectedIds.has(company.id) ? 'text-brand-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                      {selectedIds.has(company.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                  </button>
+                  </td>
+              )}
               <td className="px-6 py-4">
-                <div className="font-bold text-slate-800 text-sm">{c.razaoSocial}</div>
-                {c.nomeFantasia && c.nomeFantasia !== c.razaoSocial && <div className="text-[10px] text-slate-500 font-medium uppercase mt-0.5">{c.nomeFantasia}</div>}
-                <div className="flex gap-2 mt-1.5">
-                  <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono">CNPJ: {c.cnpj}</span>
-                  <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono">IE: {c.inscricaoEstadual}</span>
+                <div className="flex flex-col gap-1.5">
+                    {/* Razão Social em Destaque */}
+                    <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
+                    
+                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
+                    {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
+                         <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
+                    )}
+                    
+                    {/* Badges de IDs */}
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                        <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
+                           CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
+                        </span>
+                        <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
+                           IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
+                        </span>
+                    </div>
+
+                    {/* Data da Situação movida para cá */}
+                    {company.dataSituacaoCadastral && (
+                        <div className="flex items-center gap-1 mt-1 text-rose-600">
+                            <AlertCircle size={10} />
+                            <span className="text-[10px] font-bold">Desde: {company.dataSituacaoCadastral}</span>
+                        </div>
+                    )}
                 </div>
-                {c.dataSituacaoCadastral && <div className="text-[9px] text-rose-500 font-bold mt-1 uppercase tracking-tighter">Desde: {c.dataSituacaoCadastral}</div>}
               </td>
-              <td className="px-6 py-4">
-                <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase ${c.situacaoCadastral?.includes('ATIVA') ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                  {c.situacaoCadastral}
+              <td className="px-6 py-4 align-top">
+                <span className={`inline-flex px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                  company.situacaoCadastral?.toUpperCase().includes('ATIVA') 
+                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                  : 'bg-rose-100 text-rose-700 border border-rose-200'
+                }`}>
+                  {company.situacaoCadastral?.replace('Situação Cadastral Vigente:', '').trim() || 'N/D'}
                 </span>
               </td>
-              <td className="px-6 py-4"><StatusBadge status={c.campaignStatus} /></td>
-              {onToggleAi && <td className="px-6 py-4 text-center">
-                <button onClick={() => onToggleAi(c.id, c.aiActive)} className={`p-1.5 rounded-full ${c.aiActive ? 'text-emerald-500 bg-emerald-50' : 'text-slate-300'}`}>
-                  <Bot size={18} />
-                </button>
-              </td>}
-              <td className="px-6 py-4">
-                <div className="text-xs text-brand-600 font-bold truncate max-w-[200px]" title={c.motivoSituacao}>{cleanReasonText(c.motivoSituacao)}</div>
-                <div className="text-[10px] text-slate-400 font-medium uppercase mt-1">{c.municipio}</div>
+              <td className="px-6 py-4 align-top">
+                   <StatusBadge status={company.campaignStatus} />
               </td>
+              <td className="px-6 py-4 align-top text-center">
+                  <button 
+                    onClick={() => onToggleAi && onToggleAi(company.id, company.aiActive)}
+                    className={`p-1.5 rounded-full transition-colors ${
+                        company.aiActive 
+                        ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100' 
+                        : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-100'
+                    }`}
+                    title={company.aiActive ? "Desativar IA" : "Ativar IA"}
+                  >
+                      {company.aiActive ? <Bot size={18} /> : <Power size={18} />}
+                  </button>
+              </td>
+              <td className="px-6 py-4 align-top text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
+                  {cleanReasonText(company.motivoSituacao || 'N/D')}
+              </td>
+              <td className="px-6 py-4 align-top font-medium text-slate-700">{company.municipio?.replace('Município:', '').trim() || '-'}</td>
             </tr>
           ))}
-          {companies.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-slate-300 italic">Nenhum registro encontrado.</td></tr>}
         </tbody>
       </table>
     </div>
-  </div>
 ));
 
-// --- Main App ---
+const StatusBadge = ({ status }: { status: string }) => {
+    const map: Record<string, string> = {
+        'pending': 'bg-slate-100 text-slate-600',
+        'queued': 'bg-amber-100 text-amber-700',
+        'sent': 'bg-blue-100 text-blue-700',
+        'replied': 'bg-purple-100 text-purple-700',
+        'interested': 'bg-emerald-100 text-emerald-700',
+        'not_interested': 'bg-rose-100 text-rose-700',
+        'error': 'bg-red-100 text-red-700',
+        'skipped': 'bg-gray-100 text-gray-500'
+    };
+    const labels: Record<string, string> = {
+        'pending': 'Pendente',
+        'queued': 'Fila',
+        'sent': 'Enviado',
+        'replied': 'Respondeu',
+        'interested': 'Interessado',
+        'not_interested': 'Descartado',
+        'error': 'Erro',
+        'skipped': 'Sem Zap'
+    };
+    return (
+        <span className={`px-2 py-1 rounded-full text-xs font-bold ${map[status] || map['pending']}`}>
+            {labels[status] || status}
+        </span>
+    )
+}
+
+const KanbanCard: React.FC<{ company: CompanyResult, onClick: () => void }> = ({ company, onClick }) => (
+    <div onClick={onClick} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-brand-300 group">
+        <div className="flex justify-between items-start mb-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">{company.inscricaoEstadual}</span>
+            <div className="flex gap-1">
+                {company.aiActive && <Bot size={14} className="text-emerald-500" />}
+                {company.telefone && <MessageCircle size={14} className="text-brand-500"/>}
+            </div>
+        </div>
+        <h4 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2">{company.razaoSocial}</h4>
+        <p className="text-xs text-slate-500 mb-2 truncate">{company.municipio}</p>
+        <div className="flex justify-between items-center border-t border-slate-50 pt-2">
+             <StatusBadge status={company.campaignStatus} />
+             <span className="text-[10px] text-slate-400">{new Date().toLocaleDateString()}</span>
+        </div>
+    </div>
+);
+
+const KanbanColumn = ({ title, status, companies, onMove, onCardClick }: any) => {
+    return (
+        <div className="min-w-[280px] w-[280px] flex flex-col h-full bg-slate-100/50 rounded-2xl border border-slate-200/60 flex-shrink-0">
+            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/50 rounded-t-2xl">
+                <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${
+                        status === 'interested' ? 'bg-emerald-500' :
+                        status === 'replied' ? 'bg-purple-500' :
+                        status === 'sent' ? 'bg-blue-500' : 'bg-slate-400'
+                    }`}></span>
+                    {title}
+                </h3>
+                <span className="bg-white px-2 py-0.5 rounded text-xs font-bold text-slate-500 border border-slate-200">
+                    {companies.length}
+                </span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                {companies.map((c: any) => (
+                    <KanbanCard key={c.id} company={c} onClick={() => onCardClick(c)} />
+                ))}
+            </div>
+        </div>
+    )
+}
+
+const SelectedLeadModal = ({ company, onClose, onGoToChat }: any) => {
+    if (!company) return null;
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-slide-up">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 className="text-xl font-bold text-slate-800">Detalhes do Lead</h3>
+                    <button onClick={onClose}><X className="text-slate-400 hover:text-slate-600" /></button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-bold">Empresa</label>
+                        <p className="text-lg font-semibold text-slate-900">{company.razaoSocial}</p>
+                        <p className="text-sm text-slate-500">{company.cnpj} | IE: {company.inscricaoEstadual}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Município</label>
+                            <p className="text-sm font-medium">{company.municipio}</p>
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Situação</label>
+                            <p className="text-sm font-medium">{company.situacaoCadastral}</p>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-bold">Motivo da Inaptidão</label>
+                        <div className="bg-rose-50 text-rose-800 p-3 rounded-lg text-sm border border-rose-100">
+                            {cleanReasonText(company.motivoSituacao) || 'Não informado'}
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                         <button onClick={onClose} className="btn-secondary">Fechar</button>
+                         <button onClick={() => onGoToChat(company)} className="btn-primary" disabled={!company.telefone}>
+                             <MessageCircle size={18} /> Ir para WhatsApp
+                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+const ApiKeyInput = ({ label, provider, currentKey, onChange, activeProvider }: any) => {
+    const [show, setShow] = useState(false);
+    return (
+        <div className={`p-4 rounded-xl border transition-all ${activeProvider === provider ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-200'}`}>
+            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center justify-between">
+                <span>{label}</span>
+                {activeProvider === provider && <span className="text-xs font-bold text-brand-600 px-2 py-0.5 bg-white rounded-full border border-brand-100">ATIVO</span>}
+            </label>
+            <div className="relative">
+                <input 
+                    type={show ? "text" : "password"}
+                    className="input-premium pr-10"
+                    value={currentKey || ''}
+                    onChange={(e) => onChange(provider, e.target.value)}
+                    placeholder={`Cole sua API Key do ${label}...`}
+                />
+                <button onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {show ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN APP COMPONENT ---
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  // Data States
   const [companies, setCompanies] = useState<CompanyResult[]>([]);
   const [imports, setImports] = useState<ImportBatch[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
+
+  // Import Process State
   const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
   const [processProgress, setProcessProgress] = useState({ total: 0, processed: 0, status: '' });
-  const [filters, setFilters] = useState({ search: '', city: '', reason: '', hasAccountant: 'all', status: 'all', statusWa: 'all', hasPhone: 'all' });
+
+  // Filters State
+  const [filters, setFilters] = useState({
+    search: '',
+    city: '',
+    reason: '',
+    hasAccountant: 'all',
+    status: 'all',
+    statusWa: 'all', // Added WhatsApp Status Filter
+    hasPhone: 'all'
+  });
+  
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [availableReasons, setAvailableReasons] = useState<string[]>([]);
+
+  // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [viewingCampaign, setViewingCampaign] = useState<any | null>(null);
-  const [campaignLeads, setCampaignLeads] = useState<CompanyResult[]>([]);
+  
+  // Kanban Selection
+  const [selectedKanbanLead, setSelectedKanbanLead] = useState<CompanyResult | null>(null);
+
+  // Campaign Wizard State
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
   const [campaignStep, setCampaignStep] = useState(1);
-  const [newCampaign, setNewCampaign] = useState({ name: '', description: '', initialMessage: 'Olá, tudo bem? Notei que sua empresa possui pendências na SEFAZ e gostaria de ajudar na regularização.', aiPersona: DEFAULT_AI_PERSONA });
-  const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', { model: 'gemini-3-flash-preview', provider: 'gemini', apiKeys: { gemini: '', groq: '' }, persona: DEFAULT_AI_PERSONA, knowledgeRules: [], temperature: 0.7, aiActive: true });
+  const [newCampaign, setNewCampaign] = useState({
+     name: '',
+     description: '',
+     initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+     aiPersona: DEFAULT_AI_PERSONA
+  });
+
+  // AI & Rules
+  const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
+    model: 'gemini-2.5-flash',
+    provider: 'gemini',
+    apiKeys: { gemini: '', groq: '' },
+    persona: DEFAULT_AI_PERSONA,
+    knowledgeRules: [],
+    temperature: 0.7,
+    aiActive: true
+  });
+  const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
+
+  // WhatsApp State
   const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
   const [chats, setChats] = useState<any[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
-  useEffect(() => { fetchCompanies(); fetchImports(); fetchFilters(); fetchCampaigns(); fetchAiConfig(); }, []);
-  useInterval(() => { fetchWhatsAppStatus(); if (activeTab === 'whatsapp' && waSession.status === 'connected') { fetchChats(); if (activeChat) fetchMessages(activeChat); } }, 3000);
-  
+  // Initial Load
   useEffect(() => {
-    if (currentProcessId) {
-      const eventSource = new EventSource(`/progress/${currentProcessId}`);
-      eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        setProcessProgress(data);
-        if (data.status === 'completed' || data.status === 'error') {
-          eventSource.close(); fetchCompanies(); fetchImports(); fetchFilters();
-          setTimeout(() => setCurrentProcessId(null), 3000);
-        }
-      };
-      eventSource.onerror = () => eventSource.close();
-      return () => eventSource.close();
-    }
-  }, [currentProcessId]);
+    fetchCompanies();
+    fetchImports();
+    fetchFilters();
+    fetchCampaigns();
+    fetchAiConfig();
+  }, []);
 
-  const fetchAiConfig = async () => { try { const res = await fetch('/api/config'); if (res.ok) setAiConfig(await res.json()); } catch (e) {} };
-  const fetchFilters = async () => { try { const res = await fetch('/api/unique-filters'); if (res.ok) { const d = await res.json(); setAvailableCities(d.municipios); setAvailableReasons(d.motivos); } } catch (e) {} };
-  const fetchCampaigns = async () => { try { const res = await fetch('/api/campaigns'); if (res.ok) setCampaigns(await res.json()); } catch (e) {} };
-  const fetchCompanies = async () => { try { const res = await fetch('/get-all-results'); if (res.ok) { const d = await res.json(); setCompanies(d); setStats({ total: d.length, processed: d.length, success: d.filter((c:any) => c.status === 'Sucesso').length, errors: d.filter((c:any) => c.status !== 'Sucesso').length }); } } catch (e) {} };
-  const fetchImports = async () => { try { const res = await fetch('/get-imports'); if (res.ok) setImports(await res.json()); } catch (e) {} };
-  const fetchWhatsAppStatus = async () => { try { const res = await fetch('/api/whatsapp/status'); if (res.ok) { const d = await res.json(); setWaSession({ status: d.status, qrCode: d.qr }); } } catch (e) {} };
-  const fetchChats = async () => { try { const res = await fetch('/api/whatsapp/chats'); if (res.ok) setChats(await res.json()); } catch (e) {} };
-  const fetchMessages = async (id: string) => { try { const res = await fetch(`/api/whatsapp/messages/${id}`); if (res.ok) setChatMessages(await res.json()); } catch (e) {} };
-  const fetchCampaignLeads = async (id: string) => { try { const res = await fetch(`/api/campaigns/${id}/leads`); if (res.ok) setCampaignLeads(await res.json()); } catch (e) {} };
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setIsCreatingCampaign(false);
+    setCampaignStep(1);
+    setSelectedKanbanLead(null);
+  }, [activeTab]);
+
+  useInterval(() => {
+    fetchWhatsAppStatus();
+    if (activeTab === 'whatsapp' && waSession.status === 'connected') {
+      fetchChats();
+      if (activeChat) fetchMessages(activeChat);
+    }
+  }, 3000);
+
+  // Progress Polling for Import
+  useInterval(() => {
+    if (currentProcessId) {
+      fetch(`/progress/${currentProcessId}`)
+        .then(res => {
+           const reader = res.body?.getReader();
+           return new ReadableStream({
+             start(controller) {
+               function push() {
+                 reader?.read().then(({ done, value }) => {
+                   if (done) { controller.close(); return; }
+                   const chunk = new TextDecoder("utf-8").decode(value);
+                   const lines = chunk.split('\n\n');
+                   lines.forEach(line => {
+                     if (line.startsWith('data: ')) {
+                       try {
+                         const data = JSON.parse(line.replace('data: ', ''));
+                         if (data.status === 'not_found') return;
+                         setProcessProgress(data);
+                         if (data.status === 'completed' || data.status === 'error') {
+                           fetchCompanies(); 
+                           fetchImports();
+                           fetchFilters(); 
+                           setTimeout(() => setCurrentProcessId(null), 3000);
+                         }
+                       } catch (e) {}
+                     }
+                   });
+                   push();
+                 });
+               }
+               push();
+             }
+           });
+        })
+        .catch(console.error);
+    }
+  }, currentProcessId ? 1000 : null);
+
+  const fetchAiConfig = async () => {
+      try {
+          const res = await fetch('/api/config');
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data);
+          }
+      } catch (e) { console.error(e); }
+  }
+
+  const saveAiConfig = async (newConfig: AIConfig) => {
+      setIsSavingConfig(true);
+      try {
+          const res = await fetch('/api/config/ai-rules', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  rules: newConfig.knowledgeRules,
+                  persona: newConfig.persona,
+                  temperature: newConfig.temperature,
+                  model: newConfig.model,
+                  aiActive: newConfig.aiActive,
+                  provider: newConfig.provider,
+                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
+              })
+          });
+          
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
+              alert('Configurações salvas e aplicadas com sucesso!');
+          } else {
+              alert('Erro ao salvar no servidor.');
+          }
+      } catch (e) { 
+          console.error(e); 
+          alert('Erro de conexão ao salvar configurações'); 
+      } finally {
+          setIsSavingConfig(false);
+      }
+  }
+
+  const cleanupOrphanedData = async () => {
+      if(!confirm("Isso apagará empresas que não têm um arquivo de importação vinculado (Ex: uploads interrompidos). Continuar?")) return;
+      try {
+          const res = await fetch('/api/cleanup', { method: 'POST' });
+          if(res.ok) {
+              alert('Limpeza concluída!');
+              fetchCompanies();
+          }
+      } catch (e) { alert('Erro ao limpar'); }
+  }
+
+  // --- API Calls ---
+
+  const fetchFilters = async () => {
+    try {
+      const res = await fetch('/api/unique-filters');
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableCities((data.municipios as string[]) || []);
+        
+        if (data.motivos) {
+             const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
+             setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
+        } else {
+             setAvailableReasons([]);
+        }
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchCampaigns = async () => {
+      try {
+          const res = await fetch('/api/campaigns');
+          if (res.ok) setCampaigns(await res.json());
+      } catch (e) { console.error(e); }
+  };
+
+  const deleteCampaign = async (id: string) => {
+      if(!confirm("Tem certeza que deseja excluir esta campanha? Os leads voltarão para o status pendente.")) return;
+      try {
+          const res = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+          if(res.ok) {
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert("Erro ao excluir campanha");
+          }
+      } catch (e) { alert("Erro de conexão"); }
+  }
+
+  const fetchCompanies = async () => {
+    try {
+      const res = await fetch('/get-all-results');
+      if (res.ok) {
+        const data = await res.json();
+        setCompanies(data);
+        const success = data.filter((c: any) => c.status === 'Sucesso' || c.status === Status.SUCCESS).length;
+        const errors = data.filter((c: any) => c.status !== 'Sucesso' && c.status !== Status.SUCCESS).length;
+        setStats({ total: data.length, processed: data.length, success, errors });
+      }
+    } catch (error) { console.error(error); } 
+  };
+
+  const fetchImports = async () => {
+    try {
+      const res = await fetch('/get-imports');
+      if (res.ok) setImports(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteImport = async (id: string) => {
+      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
+      try {
+          await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+          // Short delay to ensure scraping stopped and DB cleared
+          setTimeout(() => {
+              fetchImports();
+              fetchCompanies();
+          }, 1000);
+      } catch(e) { alert('Erro ao deletar'); }
+  };
+
+  const fetchWhatsAppStatus = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/status');
+      if (res.ok) {
+        const data = await res.json();
+        setWaSession({ status: data.status, qrCode: data.qr });
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchChats = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/chats');
+      if (res.ok) setChats(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchMessages = async (chatId: string) => {
+    try {
+      const res = await fetch(`/api/whatsapp/messages/${chatId}`);
+      if (res.ok) setChatMessages(await res.json());
+    } catch (e) { console.error(e); }
+  };
 
   const sendMessage = async () => {
     if (!activeChat || !newMessage.trim()) return;
     try {
-      const res = await fetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: activeChat, message: newMessage }) });
-      if (res.ok) { setNewMessage(''); fetchMessages(activeChat); }
-    } catch (e) {}
-  };
-
-  const saveAiConfig = async (conf: AIConfig) => {
-    setIsSavingConfig(true);
-    try { const res = await fetch('/api/config/ai-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(conf) }); if (res.ok) setAiConfig(await res.json()); } catch (e) {} finally { setIsSavingConfig(false); }
+      setChatMessages(prev => [...prev, { id: 'temp-'+Date.now(), fromMe: true, body: newMessage, timestamp: Date.now()/1000 }]);
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: activeChat, message: newMessage })
+      });
+      if (res.ok) {
+        setNewMessage('');
+        fetchMessages(activeChat);
+      }
+    } catch (e) { console.error(e); }
   };
 
   const createCampaign = async () => {
-    try {
-      const res = await fetch('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...newCampaign, leads: Array.from(selectedIds) }) });
-      if (res.ok) { setIsCreatingCampaign(false); setSelectedIds(new Set()); setCampaignStep(1); fetchCampaigns(); fetchCompanies(); }
-    } catch (e) {}
+      if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione empresas e dê um nome à campanha.');
+      
+      try {
+          const res = await fetch('/api/campaigns', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  ...newCampaign,
+                  leads: Array.from(selectedIds)
+              })
+          });
+          if (res.ok) {
+              alert('Campanha criada e envios iniciados!');
+              setIsCreatingCampaign(false);
+              // Reset again just in case
+              setNewCampaign({
+                  name: '',
+                  description: '',
+                  initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+                  aiPersona: DEFAULT_AI_PERSONA
+              });
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert('Erro ao criar campanha');
+          }
+      } catch (e) { alert('Erro de conexão'); }
   };
 
-  const deleteCampaign = async (id: string) => { if (confirm('Excluir esta campanha?')) { try { await fetch(`/api/campaigns/${id}`, { method: 'DELETE' }); fetchCampaigns(); fetchCompanies(); } catch (e) {} } };
-  const deleteImport = async (id: string) => { if (confirm('Remover importação?')) { try { await fetch(`/api/imports/${id}`, { method: 'DELETE' }); fetchImports(); fetchCompanies(); } catch (e) {} } };
+  const updateLeadStatus = async (id: string, status: string) => {
+      try {
+          await fetch('/api/leads/status', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ id, status })
+          });
+          fetchCompanies();
+      } catch(e) { console.error(e); }
+  };
 
-  const applyFilters = (list: CompanyResult[]) => {
-    return list.filter(c => {
-      const s = !filters.search || 
-               c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) || 
-               c.cnpj?.includes(filters.search) ||
-               c.inscricaoEstadual?.includes(filters.search);
-      const ct = !filters.city || c.municipio === filters.city;
-      const rs = !filters.reason || (c.motivoSituacao && c.motivoSituacao.includes(filters.reason));
-      const acc = filters.hasAccountant === 'all' ? true : filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
-      const swa = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
-      const ph = filters.hasPhone === 'all' ? true : filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
-      return s && ct && rs && acc && swa && ph;
+  const toggleLeadAI = async (id: string, currentStatus: boolean | undefined) => {
+      const newStatus = !currentStatus;
+      try {
+          await fetch('/api/leads/toggle-ai', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ id, active: newStatus })
+          });
+          // Update local state to reflect change immediately
+          setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
+      } catch(e) { console.error(e); }
+  };
+
+  // --- Filtering Logic ---
+
+  const filteredCompanies = useMemo(() => {
+    return companies.filter(c => {
+      const searchMatch = !filters.search || 
+        c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) ||
+        c.inscricaoEstadual?.includes(filters.search) ||
+        c.cnpj?.includes(filters.search);
+        
+      const cityMatch = !filters.city || c.municipio === filters.city;
+      
+      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
+      const reasonMatch = !filters.reason || 
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
+        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+        
+      const accountantMatch = filters.hasAccountant === 'all' ? true :
+        filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+        
+      const phoneMatch = filters.hasPhone === 'all' ? true :
+        filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+        
+      const waMatch = filters.statusWa === 'all' ? true :
+        c.campaignStatus === filters.statusWa;
+
+      return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch && waMatch;
     });
+  }, [companies, filters]);
+
+  // --- Selection Logic ---
+
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
   };
 
-  const filteredCompanies = useMemo(() => applyFilters(companies), [companies, filters]);
-  const filteredCampaignLeads = useMemo(() => applyFilters(campaignLeads), [campaignLeads, filters]);
-
-  const toggleSelection = (id: string) => { const n = new Set(selectedIds); if (n.has(id)) n.delete(id); else n.add(id); setSelectedIds(n); };
-  const toggleSelectAllVisible = () => {
-    const visibleIds = filteredCompanies.map(c => c.id);
-    const allVisibleSelected = visibleIds.every(id => selectedIds.has(id));
-    const n = new Set(selectedIds);
-    if (allVisibleSelected) visibleIds.forEach(id => n.delete(id)); else visibleIds.forEach(id => n.add(id));
-    setSelectedIds(n);
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredCompanies.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredCompanies.map(c => c.id)));
+    }
   };
+
+  const goToChat = (company: CompanyResult) => {
+      if(company.telefone) {
+          const raw = company.telefone.replace(/\D/g, '');
+          const target = raw.length < 12 ? '55' + raw : raw;
+          const chatId = target + '@c.us';
+          setActiveTab('whatsapp');
+          setActiveChat(chatId);
+          fetchMessages(chatId);
+          setSelectedKanbanLead(null); // Close modal
+      } else {
+          alert('Empresa sem telefone cadastrado.');
+      }
+  };
+
+  // Handler to reset and open campaign wizard
+  const handleOpenNewCampaign = () => {
+      setNewCampaign({
+          name: '',
+          description: '',
+          initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+          aiPersona: DEFAULT_AI_PERSONA
+      });
+      setSelectedIds(new Set());
+      setCampaignStep(1);
+      setIsCreatingCampaign(true);
+  };
+
+  // --- Render ---
+
+  // Helper to find company in active chat
+  const activeChatCompany = useMemo(() => {
+      if (!activeChat || companies.length === 0) return null;
+      
+      // 1. Try to clean the ID (only digits)
+      const cleanChatId = activeChat.replace(/\D/g, '');
+      
+      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
+      // This solves the @lid issue where the ID is not the phone number
+      const currentChatObj = chats.find(c => c.id === activeChat);
+      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
+
+      return companies.find(c => {
+          if (!c.telefone) return false;
+          const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
+          
+          // Match against ID digits OR Name digits
+          return cleanChatId.includes(cleanCompanyPhone) || 
+                 cleanCompanyPhone.includes(cleanChatId) ||
+                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
+      });
+  }, [activeChat, companies, chats]);
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all flex flex-col shadow-2xl z-20`}>
-        <div className="p-5 flex items-center justify-between border-b border-brand-800/30">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-9 h-9 bg-brand-500 rounded-lg flex items-center justify-center font-black shadow-lg shadow-brand-500/20">V</div>
-            {isSidebarOpen && <span className="font-bold tracking-tight text-lg whitespace-nowrap">CRM VÍRGULA</span>}
+    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
+      
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
+        <div className="p-4 flex items-center justify-between border-b border-brand-800/50">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shrink-0">
+              <span className="font-bold text-white text-lg">V</span>
+            </div>
+            {isSidebarOpen && <span className="font-bold text-lg tracking-tight whitespace-nowrap">CRM VÍRGULA</span>}
           </div>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-brand-900 rounded-lg transition-colors"><Menu size={18} /></button>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-brand-800 rounded-lg">
+            <Menu size={18} className="text-brand-200" />
+          </button>
         </div>
-        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto custom-scrollbar">
-          {[{ id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' }, 
-            { id: 'kanban', icon: Trello, label: 'Kanban Vendas' }, 
-            { id: 'import', icon: Upload, label: 'Importar PDF' }, 
-            { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' }, 
-            { id: 'campaigns', icon: Rocket, label: 'Gestão de Campanhas' }, 
-            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp' }, 
-            { id: 'knowledge', icon: BookOpen, label: 'Conhecimento IA' }, 
-            { id: 'settings', icon: Settings, label: 'Configurações' }
-          ].map(i => (
-            <button key={i.id} onClick={() => setActiveTab(i.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all relative group ${activeTab === i.id ? 'bg-brand-600 text-white shadow-lg' : 'text-brand-300 hover:bg-brand-900/50 hover:text-white'}`}>
-              <i.icon size={20} />
-              {isSidebarOpen && <span className="text-sm font-medium flex-1 text-left">{i.label}</span>}
-              {!isSidebarOpen && <div className="absolute left-full ml-4 px-3 py-2 bg-slate-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">{i.label}</div>}
+
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
+          {[
+            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+            { id: 'kanban', icon: Trello, label: 'Kanban Vendas' },
+            { id: 'import', icon: Upload, label: 'Importar PDF' },
+            { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' },
+            { id: 'campaigns', icon: Rocket, label: 'Gestão de Campanhas' },
+            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', badge: waSession.status === 'connected' ? 'On' : 'Off' },
+            { id: 'knowledge', icon: BookOpen, label: 'Base de Conhecimento' },
+            { id: 'settings', icon: Settings, label: 'Configurações' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative ${
+                activeTab === item.id 
+                  ? 'bg-brand-600 text-white shadow-lg' 
+                  : 'text-brand-200 hover:bg-brand-900/50 hover:text-white'
+              }`}
+            >
+              <item.icon size={20} />
+              {isSidebarOpen && (
+                <>
+                  <span className="font-medium text-sm flex-1 text-left">{item.label}</span>
+                  {item.badge && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.badge === 'On' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </>
+              )}
             </button>
           ))}
         </nav>
+
+        {/* Global AI Toggle in Sidebar */}
+        {isSidebarOpen && (
+            <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Bot size={18} className={aiConfig.aiActive ? "text-emerald-400" : "text-slate-400"} />
+                        <span className="text-sm font-medium">IA Geral</span>
+                    </div>
+                    <button 
+                        onClick={() => saveAiConfig({...aiConfig, aiActive: !aiConfig.aiActive})}
+                        className={`w-10 h-5 rounded-full flex items-center transition-all p-1 ${aiConfig.aiActive ? 'bg-emerald-500 justify-end' : 'bg-slate-600 justify-start'}`}
+                    >
+                        <div className="w-3 h-3 bg-white rounded-full shadow-md"></div>
+                    </button>
+                </div>
+            </div>
+        )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto relative flex flex-col">
-        <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-8 py-5 flex items-center justify-between">
-          <h1 className="text-xl font-black text-slate-800 tracking-tight uppercase">{activeTab.replace('-', ' ')}</h1>
-          <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-100 rounded-full">
-            <div className={`w-2 h-2 rounded-full ${waSession.status==='connected'?'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]':'bg-rose-500'}`}></div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase">{waSession.status==='connected'?'Online':'Desconectado'}</span>
-          </div>
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-50 relative">
+        <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-slate-800">
+            {activeTab === 'dashboard' && 'Visão Geral'}
+            {activeTab === 'kanban' && 'Gestão de Atendimentos'}
+            {activeTab === 'import' && 'Importação de Dados'}
+            {activeTab === 'companies' && 'Base de Empresas'}
+            {activeTab === 'campaigns' && 'Campanhas de Marketing'}
+            {activeTab === 'whatsapp' && 'Atendimento'}
+            {activeTab === 'knowledge' && 'Base de Conhecimento'}
+            {activeTab === 'settings' && 'Configurações'}
+          </h1>
         </header>
 
-        <div className="p-8 max-w-[1600px] mx-auto w-full flex-1">
+        <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
+          
+          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
-              {[{l:'Empresas na Base',v:stats.total, i:FileSpreadsheet, c:'brand'},
-                {l:'Sucesso Sefaz',v:stats.success, i:CheckCircle2, c:'emerald'},
-                {l:'Erros Raspagem',v:stats.errors, i:AlertCircle, c:'rose'},
-                {l:'Campanhas',v:campaigns.length, i:Rocket, c:'purple'}
-              ].map((s,i) => (
-                <div key={i} className="card-premium p-6 card-hover border-slate-200/50">
-                  <div className={`p-3 bg-${s.c}-50 rounded-2xl text-${s.c}-600 inline-block mb-4`}><s.i size={24} /></div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{s.l}</p>
-                  <h3 className="text-3xl font-black text-slate-800 tracking-tight">{s.v}</h3>
-                </div>
-              ))}
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                {[
+                  { label: 'Total na Base', value: stats.total, color: 'text-brand-600', bg: 'bg-brand-50' },
+                  { label: 'Sucesso Scraper', value: stats.success, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { label: 'Erros Leitura', value: stats.errors, color: 'text-rose-600', bg: 'bg-rose-50' },
+                  { label: 'Campanhas Ativas', value: campaigns.length, color: 'text-amber-600', bg: 'bg-amber-50' },
+                ].map((stat, i) => (
+                  <div key={i} className="card-premium p-6 hover:-translate-y-1 transition-transform">
+                    <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
+                    <h3 className="text-3xl font-bold text-slate-700">{stat.value}</h3>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           {activeTab === 'import' && (
-            <div className="space-y-6 max-w-4xl mx-auto animate-fade-in">
-              <div className="card-premium p-10 text-center border-2 border-dashed border-slate-200 hover:border-brand-400 transition-all relative group bg-white">
-                {!currentProcessId ? (
-                  <>
-                    <input type="file" accept=".pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={async (e) => { 
-                      const f = e.target.files?.[0]; 
-                      if(f) { 
-                        const fd = new FormData(); fd.append('file', f); 
-                        const r = await fetch('/start-processing', { method:'POST', body:fd }); 
-                        if(r.ok) setCurrentProcessId((await r.json()).processId); 
-                      } 
-                    }} />
-                    <div className="w-16 h-16 bg-brand-50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-brand-500 group-hover:scale-110 transition-transform">
-                      <Upload size={28} />
+            <div className="space-y-8">
+              {!currentProcessId && (
+                <div className="max-w-xl mx-auto card-premium p-10 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-all group cursor-pointer relative bg-white">
+                  <input 
+                    type="file" 
+                    accept=".pdf" 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const formData = new FormData();
+                      formData.append('file', file);
+                      try {
+                        const res = await fetch('/start-processing', { method: 'POST', body: formData });
+                        if (res.ok) {
+                          const { processId } = await res.json();
+                          setCurrentProcessId(processId);
+                        } else {
+                          alert('Erro ao enviar arquivo.');
+                        }
+                      } catch (err) { console.error(err); alert('Erro de conexão.'); }
+                    }}
+                  />
+                  <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
+                    <Upload size={40} />
+                  </div>
+                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Nova Importação SEFAZ</h3>
+                  <p className="text-slate-500 text-lg">Arraste o PDF ou clique para selecionar</p>
+                </div>
+              )}
+
+              {currentProcessId && (
+                <div className="max-w-2xl mx-auto card-premium p-8 text-center animate-fade-in">
+                  <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                    <RefreshCw size={32} className="animate-spin" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800 mb-2">Processando PDF...</h3>
+                  <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden mb-2">
+                    <div 
+                      className={`bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out`}
+                      style={{ width: `${processProgress.total > 0 ? (processProgress.processed / processProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-sm font-medium text-slate-600">
+                    {processProgress.processed} de {processProgress.total} empresas consultadas
+                  </p>
+                </div>
+              )}
+
+              <div className="card-premium p-6">
+                  <h3 className="text-lg font-bold mb-4 text-slate-800">Gerenciador de Arquivos</h3>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-600 font-medium">
+                              <tr>
+                                  <th className="px-4 py-3">Nome do Arquivo</th>
+                                  <th className="px-4 py-3">Data Importação</th>
+                                  <th className="px-4 py-3">Total Registros</th>
+                                  <th className="px-4 py-3">Status</th>
+                                  <th className="px-4 py-3 text-right">Ações</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                              {imports.map(imp => (
+                                  <tr key={imp.id} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 font-medium text-slate-800">{imp.filename}</td>
+                                      <td className="px-4 py-3 text-slate-500">{new Date(imp.date).toLocaleDateString()}</td>
+                                      <td className="px-4 py-3 text-slate-600">{imp.total}</td>
+                                      <td className="px-4 py-3">
+                                          <span className={`text-xs px-2 py-1 rounded-full ${imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                              {imp.status === 'completed' ? 'Sucesso' : imp.status}
+                                          </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                          <button onClick={() => deleteImport(imp.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg">
+                                              <Trash2 size={16}/>
+                                          </button>
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'companies' && (
+            <div className="space-y-6">
+              <FilterBar 
+                filters={filters} 
+                setFilters={setFilters} 
+                availableCities={availableCities} 
+                availableReasons={availableReasons}
+                onRefresh={fetchCompanies}
+              />
+              <CompanyTable 
+                companies={filteredCompanies} 
+                selectedIds={selectedIds} 
+                toggleSelection={toggleSelection} 
+                toggleSelectAll={toggleSelectAll} 
+                selectable={true}
+                onToggleAi={toggleLeadAI}
+              />
+            </div>
+          )}
+
+          {activeTab === 'kanban' && (
+              <div className="h-full">
+                  <div className="flex gap-4 overflow-x-auto pb-4 h-[calc(100vh-140px)]">
+                      <KanbanColumn 
+                        title="Envio Pendente" 
+                        status="pending" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'pending' || c.campaignStatus === 'queued' || !c.campaignStatus)} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Enviados" 
+                        status="sent" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'sent' || c.campaignStatus === 'delivered')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Responderam" 
+                        status="replied" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'replied')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Interessados" 
+                        status="interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'interested')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                       <KanbanColumn 
+                        title="Descartados" 
+                        status="not_interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'not_interested' || c.campaignStatus === 'skipped' || c.campaignStatus === 'error')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                  </div>
+                  <SelectedLeadModal 
+                    company={selectedKanbanLead} 
+                    onClose={() => setSelectedKanbanLead(null)} 
+                    onGoToChat={goToChat}
+                  />
+              </div>
+          )}
+
+          {activeTab === 'campaigns' && (
+            <div className="space-y-6">
+               {!isCreatingCampaign ? (
+                   <div className="space-y-6">
+                       <div className="flex justify-between items-center">
+                           <h2 className="text-xl font-bold text-slate-700">Minhas Campanhas</h2>
+                           <button onClick={handleOpenNewCampaign} className="btn-primary flex items-center gap-2">
+                               <Plus size={18}/> Nova Campanha
+                           </button>
+                       </div>
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                           {campaigns.map(c => (
+                               <div key={c.id} className="card-premium p-6 group relative">
+                                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                       <button onClick={() => deleteCampaign(c.id)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg">
+                                           <Trash2 size={18}/>
+                                       </button>
+                                   </div>
+                                   <div className="flex justify-between items-start mb-4">
+                                       <div className="p-3 bg-brand-50 text-brand-600 rounded-xl">
+                                           <Rocket size={24}/>
+                                       </div>
+                                       <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full uppercase">Ativa</span>
+                                   </div>
+                                   <h3 className="font-bold text-lg text-slate-800 mb-2">{c.name}</h3>
+                                   <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-4">
+                                       <div><p className="text-xs text-slate-400">Total</p><p className="font-bold">{c.stats?.total || 0}</p></div>
+                                       <div><p className="text-xs text-slate-400">Enviados</p><p className="font-bold text-brand-600">{c.stats?.sent || 0}</p></div>
+                                       <div><p className="text-xs text-slate-400">Respostas</p><p className="font-bold text-emerald-600">{c.stats?.replied || 0}</p></div>
+                                   </div>
+                               </div>
+                           ))}
+                       </div>
+                   </div>
+               ) : (
+                   <div className="max-w-5xl mx-auto">
+                       <div className="mb-8 flex items-center justify-between">
+                           <div><h2 className="text-2xl font-bold text-slate-800">Criar Nova Campanha</h2></div>
+                           <button onClick={() => setIsCreatingCampaign(false)}><X size={24}/></button>
+                       </div>
+                       <div className="card-premium p-8">
+                           {campaignStep === 1 && (
+                               <div className="max-w-xl mx-auto space-y-6">
+                                   <input className="input-premium" placeholder="Nome da Campanha" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} />
+                                   <textarea className="input-premium h-32" placeholder="Descrição" value={newCampaign.description} onChange={e => setNewCampaign({...newCampaign, description: e.target.value})} />
+                                   <button onClick={() => setCampaignStep(2)} className="btn-primary w-full">Próximo</button>
+                               </div>
+                           )}
+                           {campaignStep === 2 && (
+                               <div className="space-y-4">
+                                   <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
+                                   <div className="h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
+                                      <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} toggleSelectAll={toggleSelectAll} selectable={true} onToggleAi={toggleLeadAI} />
+                                   </div>
+                                   <div className="flex justify-between pt-4">
+                                       <button onClick={() => setCampaignStep(1)} className="btn-secondary">Voltar</button>
+                                       <button onClick={() => setCampaignStep(3)} className="btn-primary" disabled={selectedIds.size === 0}>Próximo ({selectedIds.size})</button>
+                                   </div>
+                               </div>
+                           )}
+                           {campaignStep === 3 && (
+                               <div className="grid grid-cols-2 gap-8">
+                                   <textarea className="input-premium h-64" value={newCampaign.initialMessage} onChange={e => setNewCampaign({...newCampaign, initialMessage: e.target.value})} />
+                                   <textarea className="input-premium h-64" value={newCampaign.aiPersona} onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})} />
+                                   <button onClick={createCampaign} className="btn-primary col-span-2">Disparar</button>
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               )}
+            </div>
+          )}
+
+          {/* --- WHATSAPP TAB --- */}
+          {activeTab === 'whatsapp' && (
+            <div className="flex h-full gap-6">
+              {/* Sidebar List */}
+              <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                       <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                           <User size={20} />
+                       </div>
+                       <h3 className="font-bold text-slate-700">Conversas</h3>
+                   </div>
+                   <div className="flex gap-2">
+                        <div className={`w-3 h-3 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`} title={waSession.status}></div>
+                   </div>
+                </div>
+                
+                {waSession.status !== 'connected' && waSession.qrCode ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50/50">
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                            <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mix-blend-multiply" />
+                        </div>
+                        <p className="text-sm font-medium text-slate-600 animate-pulse flex items-center gap-2">
+                            <Phone size={16}/> Escaneie para conectar
+                        </p>
                     </div>
-                    <h2 className="text-xl font-bold text-slate-800 mb-2">Clique ou arraste o PDF SEFAZ</h2>
-                    <p className="text-xs text-slate-500">O sistema irá ler as Inscrições Estaduais e buscar os dados detalhados.</p>
+                ) : (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {chats.map(chat => (
+                            <div 
+                                key={chat.id} 
+                                onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} 
+                                className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex gap-3 ${activeChat === chat.id ? 'bg-slate-100' : ''}`}
+                            >
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-100 to-brand-200 flex-shrink-0 flex items-center justify-center text-brand-600 font-bold text-sm">
+                                    {getInitials(chat.name || 'Unknown')}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-baseline mb-1">
+                                        <h4 className="font-semibold text-slate-800 text-sm truncate">{chat.name || chat.id.split('@')[0]}</h4>
+                                        <span className="text-[10px] text-slate-400 font-medium">{formatTime(chat.timestamp)}</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                                </div>
+                                {chat.unreadCount > 0 && (
+                                    <div className="flex flex-col justify-center">
+                                        <span className="bg-emerald-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                                            {chat.unreadCount}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+              </div>
+
+              {/* Chat Window */}
+              <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
+                {/* Background Pattern Overlay (Optional) */}
+                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
+
+                {activeChat ? (
+                  <>
+                     {/* Header */}
+                     <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
+                                {activeChatCompany ? (
+                                    <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold">
+                                        {activeChatCompany.razaoSocial.substring(0,2)}
+                                    </div>
+                                ) : (
+                                    <User size={20} />
+                                )}
+                            </div>
+                            <div className="flex flex-col">
+                                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                    {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
+                                    {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
+                                </h3>
+                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
+                                {activeChatCompany ? (
+                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
+                                ) : (
+                                    <p className="text-[10px] text-slate-400">online</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {/* AI Toggle */}
+                            {activeChatCompany && (
+                                <button 
+                                    onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-xs font-bold ${
+                                        activeChatCompany.aiActive 
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-sm' 
+                                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {activeChatCompany.aiActive ? <Bot size={16} /> : <Power size={16} />}
+                                    {activeChatCompany.aiActive ? "IA Auto" : "IA Off"}
+                                </button>
+                            )}
+
+                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
+
+                            {/* Actions Menu */}
+                            <div className="flex items-center gap-1">
+                                <button 
+                                    title="Marcar como Interessado"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'interested');
+                                    }} 
+                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
+                                >
+                                    <CheckCircle2 size={20} />
+                                </button>
+                                <button 
+                                    title="Descartar"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
+                                    }} 
+                                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
+                                <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
+                                    <MoreVertical size={20} />
+                                </button>
+                            </div>
+                        </div>
+                     </div>
+
+                     {/* Messages Area */}
+                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
+                        {chatMessages.map(msg => (
+                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
+                              <div className={`relative max-w-[75%] px-3 py-2 text-sm shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] ${
+                                  msg.fromMe 
+                                  ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
+                                  : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
+                              }`}>
+                                 {/* Triangle tail */}
+                                 <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
+                                     msg.fromMe 
+                                     ? '-right-[6px] border-t-[#d9fdd3]' 
+                                     : '-left-[6px] border-t-white'
+                                 }`}></div>
+
+                                 {msg.hasMedia && (
+                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
+                                         <PaperclipIcon size={12}/> Mídia Oculta
+                                     </div>
+                                 )}
+                                 
+                                 <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
+                                 
+                                 <div className="absolute bottom-1 right-2 flex items-center gap-1">
+                                     <span className="text-[10px] text-slate-500/80">
+                                         {formatTime(msg.timestamp)}
+                                     </span>
+                                     {msg.fromMe && <Check size={12} className="text-emerald-500" />}
+                                 </div>
+                              </div>
+                           </div>
+                        ))}
+                     </div>
+
+                     {/* Input Area */}
+                     <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <Smile size={24} />
+                        </button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <PaperclipIcon size={22} />
+                        </button>
+                        
+                        <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
+                            <input 
+                                type="text" 
+                                className="flex-1 bg-transparent outline-none text-slate-800 placeholder-slate-400"
+                                value={newMessage} 
+                                onChange={e => setNewMessage(e.target.value)} 
+                                onKeyDown={e => e.key === 'Enter' && sendMessage()} 
+                                placeholder="Digite uma mensagem..." 
+                            />
+                        </div>
+
+                        {newMessage.trim() ? (
+                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
+                                <Send size={20} className="ml-0.5" />
+                            </button>
+                        ) : (
+                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                                <Mic size={24} />
+                            </button>
+                        )}
+                     </div>
                   </>
                 ) : (
-                  <div className="py-6">
-                    <div className="w-16 h-16 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-                    <h3 className="text-lg font-bold text-slate-800 mb-2">Processando {processProgress.processed} / {processProgress.total}</h3>
-                    <div className="bg-slate-100 h-2 rounded-full max-w-xs mx-auto overflow-hidden">
-                      <div className="bg-brand-500 h-full transition-all" style={{width: `${(processProgress.processed/processProgress.total)*100}%`}}></div>
-                    </div>
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-[#f0f2f5] border-b-[6px] border-brand-500/20">
+                      <div className="w-64 h-64 opacity-10 bg-contain bg-no-repeat bg-center mb-4" style={{ backgroundImage: 'url("https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg")' }}></div>
+                      <h2 className="text-2xl font-light text-slate-600 mb-2">WhatsApp CRM</h2>
+                      <p className="text-sm text-slate-500 max-w-sm text-center">Selecione uma conversa para iniciar o atendimento ou visualizar o histórico.</p>
+                      <div className="mt-8 text-xs text-slate-400 flex items-center gap-1">
+                          <Bot size={12}/> IA Ativa e pronta para vender
+                      </div>
                   </div>
                 )}
               </div>
             </div>
           )}
 
-          {activeTab === 'companies' && (
-            <div className="space-y-4 animate-fade-in">
-              <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
-              <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} selectable={false} />
-            </div>
-          )}
-
-          {activeTab === 'campaigns' && (
-            <div className="space-y-6 animate-fade-in">
-               {!isCreatingCampaign ? (
-                 <>
-                   <div className="flex justify-between items-center mb-4">
-                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Campanhas</h2>
-                     <button onClick={() => setIsCreatingCampaign(true)} className="btn-primary h-11 px-6"><Plus size={20}/> Nova Campanha</button>
-                   </div>
-                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                     {campaigns.map(c => (
-                       <div key={c.id} onClick={() => { setViewingCampaign(c); fetchCampaignLeads(c.id); }} className="card-premium p-6 cursor-pointer hover:border-brand-400 group relative bg-white">
-                         <button onClick={(e) => { e.stopPropagation(); deleteCampaign(c.id); }} className="absolute top-4 right-4 text-slate-200 hover:text-rose-500 group-hover:opacity-100 opacity-0"><Trash2 size={18}/></button>
-                         <div className="flex items-center gap-3 mb-4">
-                           <div className="p-2.5 bg-brand-600 rounded-xl text-white"><Rocket size={20}/></div>
-                           <h3 className="font-bold text-slate-800 truncate uppercase tracking-tight">{c.name}</h3>
-                         </div>
-                         <div className="grid grid-cols-3 gap-1 mb-4 bg-slate-50 rounded-xl p-1 text-center">
-                           <div className="bg-white p-2 rounded-lg">
-                             <p className="text-[8px] font-black text-slate-400 uppercase">Leads</p>
-                             <p className="font-black text-sm">{c.stats?.total || 0}</p>
-                           </div>
-                           <div className="bg-white p-2 rounded-lg">
-                             <p className="text-[8px] font-black text-slate-400 uppercase text-brand-600">Enviados</p>
-                             <p className="font-black text-sm text-brand-600">{c.stats?.sent || 0}</p>
-                           </div>
-                           <div className="bg-white p-2 rounded-lg">
-                             <p className="text-[8px] font-black text-slate-400 uppercase text-emerald-600">Retornos</p>
-                             <p className="font-black text-sm text-emerald-600">{c.stats?.replied || 0}</p>
-                           </div>
-                         </div>
-                         <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest pt-4 border-t border-slate-100">
-                           <span>{new Date(c.created_at).toLocaleDateString()}</span>
-                           <span className="text-brand-600 flex items-center gap-1 group-hover:gap-2 transition-all">Ver detalhes <ChevronRight size={12}/></span>
-                         </div>
-                       </div>
-                     ))}
-                   </div>
-                 </>
-               ) : (
-                 <div className="max-w-5xl mx-auto card-premium overflow-hidden bg-white shadow-2xl animate-slide-up">
-                   <div className="p-6 border-b bg-slate-50 flex justify-between items-center">
-                     <h2 className="text-lg font-black text-slate-800 uppercase">Configurar Campanha</h2>
-                     <button onClick={() => setIsCreatingCampaign(false)} className="p-2 hover:bg-slate-200 rounded-lg"><X/></button>
-                   </div>
-                   <div className="p-8">
-                     {campaignStep === 1 && (
-                       <div className="space-y-6 animate-fade-in">
-                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nome</label><input className="input-premium h-12" placeholder="Ex: Regularização MEI Salvador" value={newCampaign.name} onChange={e=>setNewCampaign({...newCampaign, name:e.target.value})} /></div>
-                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Descrição</label><textarea className="input-premium h-24" placeholder="Detalhes internos..." value={newCampaign.description} onChange={e=>setNewCampaign({...newCampaign, description:e.target.value})} /></div>
-                         <button onClick={()=>setCampaignStep(2)} className="btn-primary w-full h-12 text-lg uppercase tracking-widest font-black" disabled={!newCampaign.name}>Próximo Passo</button>
-                       </div>
-                     )}
-                     {campaignStep === 2 && (
-                       <div className="space-y-4 animate-fade-in">
-                         <div className="flex justify-between items-center">
-                           <h3 className="font-bold text-slate-700 uppercase text-sm">Filtrar e Selecionar Leads ({selectedIds.size})</h3>
-                           <button onClick={toggleSelectAllVisible} className="text-xs font-black text-brand-600 uppercase hover:underline">
-                             {filteredCompanies.every(c => selectedIds.has(c.id)) ? 'Deselecionar Visíveis' : 'Selecionar Visíveis'}
-                           </button>
-                         </div>
-                         <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} compact={true} />
-                         <CompanyTable 
-                            companies={filteredCompanies} 
-                            selectedIds={selectedIds} 
-                            toggleSelection={toggleSelection} 
-                            toggleSelectAll={toggleSelectAllVisible} 
-                            selectable={true} 
-                         />
-                         <div className="flex justify-between pt-4">
-                           <button onClick={()=>setCampaignStep(1)} className="btn-secondary h-11 px-6 uppercase font-black text-xs tracking-widest">Voltar</button>
-                           <button onClick={()=>setCampaignStep(3)} className="btn-primary h-11 px-10 uppercase font-black text-xs tracking-widest" disabled={selectedIds.size === 0}>Definir Mensagem</button>
-                         </div>
-                       </div>
-                     )}
-                     {campaignStep === 3 && (
-                       <div className="space-y-6 animate-fade-in">
-                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Mensagem Inicial (WhatsApp)</label><textarea className="input-premium h-48 text-sm" value={newCampaign.initialMessage} onChange={e=>setNewCampaign({...newCampaign, initialMessage:e.target.value})} /></div>
-                         <div className="flex justify-between pt-4">
-                           <button onClick={()=>setCampaignStep(2)} className="btn-secondary h-11 px-6 uppercase font-black text-xs tracking-widest">Voltar</button>
-                           <button onClick={createCampaign} className="btn-success h-11 px-10 uppercase font-black text-xs tracking-widest shadow-emerald-500/20">Lançar Campanha</button>
-                         </div>
-                       </div>
-                     )}
-                   </div>
+           {activeTab === 'knowledge' && (
+              <div className="max-w-4xl mx-auto space-y-6">
+                 <div className="flex justify-between items-center">
+                     <div>
+                        <h2 className="text-2xl font-bold text-slate-800">Base de Conhecimento</h2>
+                        <p className="text-slate-500">Vincule motivos da SEFAZ a instruções para a IA</p>
+                     </div>
+                     <button onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })} className="btn-primary">
+                         <Plus size={18} /> Nova Regra
+                     </button>
                  </div>
-               )}
-            </div>
-          )}
 
-          {activeTab === 'whatsapp' && (
-            <div className="flex h-[calc(100vh-200px)] gap-6 animate-fade-in">
-              <div className="w-80 card-premium flex flex-col bg-white overflow-hidden shadow-sm">
-                <div className="p-5 border-b font-black text-slate-800 text-sm uppercase tracking-tight">Conversas</div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                  {waSession.qrCode && waSession.status!=='connected' ? (
-                    <div className="p-6 text-center">
-                      <div className="bg-white p-2 rounded-xl shadow-sm inline-block mb-4"><img src={waSession.qrCode} className="w-40 h-40" /></div>
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-loose">Escaneie o QR Code no seu WhatsApp celular.</p>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-50">
-                      {chats.map(c => (
-                        <div key={c.id} onClick={()=>{setActiveChat(c.id);fetchMessages(c.id);}} className={`p-4 hover:bg-slate-50 cursor-pointer flex items-center gap-3 ${activeChat===c.id?'bg-brand-50/50 border-r-4 border-brand-500':''}`}>
-                          <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-black text-slate-400 uppercase text-xs">{getInitials(c.name || c.id)}</div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-bold text-slate-800 text-xs truncate">{c.name || c.id}</div>
-                            <div className="text-[10px] text-slate-400 truncate mt-0.5">{c.lastMessage}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex-1 card-premium flex flex-col bg-[#efeae2] relative overflow-hidden shadow-xl">
-                {activeChat ? (
-                  <>
-                    <div className="p-4 bg-white/95 border-b flex items-center gap-3 z-10 shadow-sm"><div className="w-9 h-9 bg-brand-100 text-brand-700 rounded-full flex items-center justify-center font-black text-xs">{getInitials(chats.find(c=>c.id===activeChat)?.name || activeChat)}</div><h3 className="font-bold text-slate-800 text-sm">{chats.find(c=>c.id===activeChat)?.name || activeChat}</h3></div>
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar relative z-0">
-                      {chatMessages.map(m => (
-                        <div key={m.id} className={`flex ${m.fromMe?'justify-end':'justify-start'} animate-fade-in`}><div className={`p-3 rounded-2xl text-xs max-w-[70%] shadow-sm ${m.fromMe?'bg-[#d9fdd3] text-slate-800 rounded-tr-none':'bg-white text-slate-800 rounded-tl-none'}`}>{m.body}<div className="text-[9px] text-slate-400 text-right mt-1 font-mono">{new Date(m.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div></div></div>
-                      ))}
-                    </div>
-                    <div className="p-4 bg-white/95 border-t flex gap-3 z-10 items-center">
-                      <input className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-xs outline-none focus:ring-2 focus:ring-brand-500/20" placeholder="Mensagem..." value={newMessage} onChange={e=>setNewMessage(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendMessage()} />
-                      <button onClick={sendMessage} className={`p-2.5 rounded-xl transition-all ${newMessage.trim()?'bg-brand-600 text-white shadow-lg shadow-brand-600/30 scale-105':'bg-slate-200 text-slate-400'}`}><Send size={20} /></button>
-                    </div>
-                  </>
-                ) : <div className="flex-1 flex flex-col items-center justify-center text-slate-300 relative z-10 p-10 text-center"><div className="w-20 h-20 bg-brand-50 rounded-full flex items-center justify-center text-brand-200 mb-6"><MessageSquare size={40}/></div><h3 className="text-xl font-bold text-slate-400 uppercase tracking-widest">Selecione uma conversa</h3></div>}
-              </div>
-            </div>
-          )}
+                 {editingRule ? (
+                     <div className="card-premium p-8 animate-fade-in">
+                         <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
+                         <div className="space-y-4">
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
+                                 <div className="relative">
+                                     <input 
+                                        list="reasons-list"
+                                        className="input-premium" 
+                                        placeholder="Selecione ou digite um motivo..."
+                                        value={editingRule.motivoSituacao}
+                                        onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
+                                     />
+                                     <datalist id="reasons-list">
+                                        {availableReasons.map((r: string, idx: number) => (
+                                            <option key={idx} value={r} />
+                                        ))}
+                                     </datalist>
+                                 </div>
+                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
+                             </div>
+                             
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-2">Instruções para a IA</label>
+                                 {editingRule.instructions.map((inst, idx) => (
+                                     <div key={idx} className="flex gap-2 mb-2">
+                                         <input 
+                                            className="input-premium flex-1" 
+                                            value={inst.content} 
+                                            onChange={e => {
+                                                const newInsts = [...editingRule.instructions];
+                                                newInsts[idx].content = e.target.value;
+                                                setEditingRule({...editingRule, instructions: newInsts});
+                                            }}
+                                            placeholder="Instrução detalhada..."
+                                         />
+                                         <button onClick={() => {
+                                             const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                             setEditingRule({...editingRule, instructions: newInsts});
+                                         }} className="p-3 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                     </div>
+                                 ))}
+                                 <button onClick={() => {
+                                     setEditingRule({
+                                         ...editingRule, 
+                                         instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]
+                                     });
+                                 }} className="text-brand-600 text-sm font-semibold hover:underline">+ Adicionar Instrução</button>
+                             </div>
 
-          {activeTab === 'settings' && (
-            <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
-              <div className="card-premium p-8 space-y-6 bg-white shadow-xl">
-                <div className="flex items-center gap-3 pb-4 border-b">
-                  <div className="p-2 bg-brand-50 text-brand-600 rounded-lg"><Settings size={20}/></div>
-                  <h3 className="font-black text-slate-800 uppercase tracking-tight">Inteligência Artificial</h3>
-                </div>
-                <div className="space-y-4">
-                  <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Provedor</label><select className="input-premium h-12" value={aiConfig.provider} onChange={e=>setAiConfig({...aiConfig, provider:e.target.value as any})}><option value="gemini">Google Gemini (API Key Automática)</option><option value="groq">Groq (Llama 3)</option></select></div>
-                  {aiConfig.provider === 'groq' && <div className="space-y-2 animate-fade-in"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Groq API Key</label><input className="input-premium h-12" type="password" value={aiConfig.apiKeys.groq} onChange={e=>setAiConfig({...aiConfig, apiKeys:{...aiConfig.apiKeys, groq:e.target.value}})} /></div>}
-                  <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Modelo</label><select className="input-premium h-12" value={aiConfig.model} onChange={e=>setAiConfig({...aiConfig, model:e.target.value})}>{aiConfig.provider === 'gemini' ? <><option value="gemini-3-flash-preview">Gemini 3 Flash</option><option value="gemini-3-pro-preview">Gemini 3 Pro</option></> : <><option value="llama-3.1-70b-versatile">Llama 3.1 70B</option><option value="llama-3.1-8b-instant">Llama 3.1 8B</option></>}</select></div>
-                  <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Personalidade</label><textarea className="input-premium h-40 text-sm" value={aiConfig.persona} onChange={e=>setAiConfig({...aiConfig, persona:e.target.value})} /></div>
-                </div>
-                <button onClick={()=>saveAiConfig(aiConfig)} className="btn-primary w-full h-12 text-lg uppercase tracking-widest font-black shadow-brand-600/20" disabled={isSavingConfig}>{isSavingConfig ? 'Salvando...' : 'Salvar Configurações'}</button>
+                             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                                 <button onClick={() => setEditingRule(null)} className="btn-secondary">Cancelar</button>
+                                 <button onClick={() => {
+                                     if(!editingRule.motivoSituacao) return alert("Preencha o motivo");
+                                     const newRules = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id);
+                                     newRules.push(editingRule);
+                                     saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                     setEditingRule(null);
+                                 }} className="btn-primary">Salvar Regra</button>
+                             </div>
+                         </div>
+                     </div>
+                 ) : (
+                     <div className="grid gap-4">
+                         {aiConfig.knowledgeRules.map(rule => (
+                             <div key={rule.id} className="card-premium p-6 flex justify-between items-start">
+                                 <div>
+                                     <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                         <BookOpen size={18} className="text-brand-500"/>
+                                         {rule.motivoSituacao}
+                                     </h4>
+                                     <ul className="mt-2 space-y-1">
+                                         {rule.instructions.map((inst, i) => (
+                                             <li key={i} className="text-sm text-slate-600 list-disc list-inside">{inst.content}</li>
+                                         ))}
+                                     </ul>
+                                 </div>
+                                 <div className="flex gap-2">
+                                     <button onClick={() => setEditingRule(rule)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit size={18}/></button>
+                                     <button onClick={() => {
+                                         if(confirm("Excluir regra?")) {
+                                             const newRules = aiConfig.knowledgeRules.filter(r => r.id !== rule.id);
+                                             saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                         }
+                                     }} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                 </div>
+                             </div>
+                         ))}
+                         {aiConfig.knowledgeRules.length === 0 && (
+                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
+                             </div>
+                         )}
+                     </div>
+                 )}
               </div>
-            </div>
-          )}
+           )}
+
+           {activeTab === 'settings' && (
+               <div className="max-w-3xl mx-auto space-y-6">
+                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
+                   
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
+                       
+                       <div className="space-y-6">
+                           <div className="grid grid-cols-2 gap-4 mb-4">
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-2.5-flash'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'gemini' 
+                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
+                                   <span className="font-bold">Google Gemini</span>
+                               </button>
+
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'groq' 
+                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
+                                   <span className="font-bold">Groq (Llama 3)</span>
+                               </button>
+                           </div>
+
+                           {aiConfig.provider === 'gemini' && (
+                               <ApiKeyInput 
+                                   label="Google Gemini" 
+                                   provider="gemini"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.gemini}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+
+                           {aiConfig.provider === 'groq' && (
+                               <ApiKeyInput 
+                                   label="Groq Cloud" 
+                                   provider="groq"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.groq}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <div className="space-y-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
+                               <input 
+                                  className="input-premium"
+                                  value={aiConfig.model}
+                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
+                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-2.5-flash" : "llama-3.1-8b-instant"}
+                               />
+                           </div>
+
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
+                               <textarea 
+                                  className="input-premium h-32"
+                                  value={aiConfig.persona}
+                                  onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
+                               />
+                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
+                           </div>
+                           
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
+                               <input 
+                                  type="range" min="0" max="1" step="0.1" 
+                                  className="w-full"
+                                  value={aiConfig.temperature}
+                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
+                               />
+                               <div className="flex justify-between text-xs text-slate-400">
+                                   <span>Preciso (0.0)</span>
+                                   <span>Criativo (1.0)</span>
+                               </div>
+                           </div>
+
+                           <div>
+                               <label className="flex items-center gap-2 cursor-pointer">
+                                   <input 
+                                      type="checkbox" 
+                                      checked={aiConfig.aiActive}
+                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
+                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
+                                   />
+                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
+                               </label>
+                           </div>
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
+                       <div className="flex justify-between items-center">
+                           <div>
+                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
+                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
+                           </div>
+                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
+                               <Trash2 size={18}/> Limpar Dados
+                           </button>
+                       </div>
+                   </div>
+
+                   <div className="flex justify-end">
+                       <button 
+                           onClick={() => saveAiConfig(aiConfig)} 
+                           disabled={isSavingConfig}
+                           className="btn-primary flex items-center gap-2"
+                       >
+                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
+                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
+                       </button>
+                   </div>
+               </div>
+           )}
+
         </div>
       </main>
-
-      {/* Campaign Details Modal */}
-      {viewingCampaign && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/60 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="bg-white rounded-3xl w-full max-w-6xl max-h-[90vh] flex flex-col shadow-2xl animate-slide-up">
-                <div className="p-6 border-b flex justify-between items-center bg-slate-50/80">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-brand-600 text-white rounded-2xl flex items-center justify-center shadow-lg"><Rocket size={24}/></div>
-                      <div>
-                        <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{viewingCampaign.name}</h3>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{viewingCampaign.description || 'Campanha de Prospecção'}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => setViewingCampaign(null)} className="p-2 hover:bg-slate-200 rounded-xl transition-colors"><X size={24}/></button>
-                </div>
-                <div className="p-4 bg-slate-50 border-b">
-                   <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} compact={true} />
-                </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-                   <CompanyTable companies={filteredCampaignLeads} selectedIds={new Set()} selectable={false} />
-                </div>
-                <div className="p-6 border-t bg-slate-50/50 flex justify-end">
-                    <button onClick={() => setViewingCampaign(null)} className="btn-secondary h-11 px-8 font-black uppercase text-xs tracking-widest">Fechar Painel</button>
-                </div>
-            </div>
-        </div>
-      )}
     </div>
   );
 };
