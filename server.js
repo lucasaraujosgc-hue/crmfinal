@@ -400,22 +400,37 @@ client.on('qr', (qr) => QRCode.toDataURL(qr, (err, url) => qrCodeData = url));
 client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = true; qrCodeData = null; });
 
 client.on('message', async (msg) => {
-    // 1. TENTATIVA ROBUSTA DE IDENTIFICAÇÃO DO NÚMERO
-    // Utilizamos msg.id.remote que geralmente contém o JID canônico do chat (ex: 5573...@c.us)
-    // diferentemente de msg.from que pode ser o dispositivo (@lid)
+    // 1. TENTATIVA CRÍTICA DE RESOLUÇÃO DO TELEFONE REAL
+    // Em dispositivos vinculados (@lid), msg.from e msg.id.remote contém o ID do dispositivo.
+    // O método getContact() acessa a store interna e retorna o perfil do contato, 
+    // onde o campo 'number' é SEMPRE o telefone real (@c.us).
     let senderNumber = "";
     
-    // Tenta usar remote se estiver disponível e for um c.us (chat padrão)
-    if (msg.id && msg.id.remote && msg.id.remote.includes('@c.us')) {
-        senderNumber = msg.id.remote.replace(/\D/g, '');
-        console.log(`[WhatsApp] Resolvido via remote: ${senderNumber} (Original: ${msg.from})`);
-    } else {
-        // Fallback: se remote não ajudar, tentamos from (pode ser lid, mas é o que tem)
-        senderNumber = msg.from.replace(/\D/g, '');
-        console.log(`[WhatsApp] Resolvido via from (Fallback): ${senderNumber}`);
+    try {
+        const contact = await msg.getContact();
+        // contact.number retorna o número puro (ex: 557391528337) sem o sufixo @lid ou @c.us
+        senderNumber = contact.number || "";
+        
+        // Se o contato falhar, tentamos via chat ID canônico
+        if (!senderNumber) {
+            const chat = await msg.getChat();
+            if (!chat.isGroup) {
+                senderNumber = chat.id.user; // Para chats privados, o user costuma ser o telefone
+            }
+        }
+    } catch(e) {
+        console.log("[WhatsApp] Erro ao resolver contato:", e.message);
+    }
+    
+    // Fallback final: limpa o ID que tiver disponível
+    if (!senderNumber) {
+        senderNumber = msg.from.split('@')[0];
     }
 
-    const phoneSuffix = senderNumber.slice(-8);
+    const cleanNumber = senderNumber.replace(/\D/g, '');
+    const phoneSuffix = cleanNumber.slice(-8);
+    
+    console.log(`[WhatsApp] De: ${msg.from} -> Resolvido p/ Telefone: ${cleanNumber} (Sufixo: ${phoneSuffix})`);
 
     // 2. FILTROS BÁSICOS DE SEGURANÇA E TIPO
     if (msg.fromMe) return; 
@@ -436,7 +451,7 @@ client.on('message', async (msg) => {
 
             // 4. VERIFICAÇÃO RIGOROSA: Se não achar no banco, PARE.
             if (!company) {
-                console.log(`[IA] Ignorada: Número ${phoneSuffix} (ID Resolvido: ${senderNumber}) não encontrado no banco.`);
+                console.log(`[IA] Ignorada: Número ${phoneSuffix} (ID Resolvido: ${cleanNumber}) não encontrado no banco.`);
                 return; 
             }
 
@@ -491,7 +506,6 @@ client.on('message', async (msg) => {
                         console.error("[IA] Erro: API Key da Groq não configurada.");
                         return;
                     }
-                    console.log(`[IA] Key Groq (final): ${groqKey.slice(-4)}`); // Debug Key
 
                     // SAFETY CHECK FOR MODEL NAME
                     let modelToUse = aiConfig.model || "llama-3.1-8b-instant";
@@ -503,7 +517,6 @@ client.on('message', async (msg) => {
                     const groq = new Groq({ apiKey: groqKey });
                     const userMessage = msg.hasMedia ? "Enviou uma mídia (não suportada pela Groq no momento)" : (msg.body || "");
                     
-                    // Nota: Groq espera que a mensagem de sistema esteja na array de messages, não num campo 'system' separado
                     const messages = [
                         { role: "system", content: systemInstruction + contextData },
                         { role: "user", content: userMessage }
@@ -547,7 +560,7 @@ client.on('message', async (msg) => {
                     const generateWithRetry = async (retries = 3) => {
                         try {
                             const model = ai.models.generateContent({ 
-                                model: aiConfig.model || 'gemini-2.5-flash',
+                                model: aiConfig.model || 'gemini-3-flash-preview',
                                 contents: { role: 'user', parts: promptParts },
                                 config: { systemInstruction: systemInstruction + contextData, temperature: aiConfig.temperature || 0.7 }
                             });
@@ -608,45 +621,36 @@ function resumeQueues() {
 // 2. Robust Sending Function
 function startCampaignSending(campaignId, message) {
     const processQueue = () => {
-        // Encontra o próximo lead na fila
         db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND campaign_status = 'queued' LIMIT 1`, [campaignId], async (err, lead) => {
             if (err) return console.error("[Campaign] DB Error:", err);
             if (!lead) return console.log(`[Campaign] Fila finalizada para ${campaignId}`);
             
-            let sent = false;
             let status = 'skipped';
             
             if (lead.telefone && clientReady) {
                  try {
                      const cleanPhone = lead.telefone.replace(/\D/g, '');
-                     // Validação básica de número BR
                      if(cleanPhone.length >= 10) {
                          const target = cleanPhone.length < 12 ? '55' + cleanPhone : cleanPhone;
                          const chatId = target + "@c.us";
                          await client.sendMessage(chatId, message);
-                         sent = true;
                          status = 'sent';
                      } else {
-                         status = 'error'; // Número inválido
+                         status = 'error'; 
                      }
                  } catch (e) { 
                      console.error(`[Campaign] Falha envio para ${lead.razao_social}:`, e.message);
                      status = 'error';
                  }
             } else if (lead.telefone && !clientReady) {
-                // Se tem telefone mas o client nao ta pronto, mantem na fila ou marca erro?
-                // Vamos marcar erro temporário ou tentar reconectar, mas para evitar loop infinito de erro, marcamos error.
                 status = 'error'; 
                 console.log("[Campaign] Client WhatsApp não pronto. Marcando erro.");
             }
 
-            // ATUALIZAÇÃO SÍNCRONA: Só chama o próximo depois de atualizar o atual.
             db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, 
                 [status, new Date().toISOString(), lead.id], 
                 (updateErr) => {
                     if(updateErr) console.error("[Campaign] Erro ao atualizar status:", updateErr);
-                    
-                    // Delay aleatório entre 15s e 30s para evitar banimento
                     const delay = Math.floor(Math.random() * 15000) + 15000;
                     console.log(`[Campaign] Lead processado (${status}). Próximo em ${delay/1000}s...`);
                     setTimeout(processQueue, delay);
@@ -661,34 +665,19 @@ function startCampaignSending(campaignId, message) {
 // --- API ROUTES ---
 app.post('/api/config/ai-rules', (req, res) => {
   const { rules, persona, temperature, model, aiActive, provider, apiKeys } = req.body;
-  
-  console.log(`[Config Update] Recebido: Active=${aiActive}, Provider=${provider}, Model=${model}`);
-  
   if (rules !== undefined) aiConfig.knowledgeRules = rules;
   if (persona !== undefined) aiConfig.persona = persona;
   if (temperature !== undefined) aiConfig.temperature = temperature;
   if (model !== undefined) aiConfig.model = model;
   if (aiActive !== undefined) aiConfig.aiActive = aiActive;
   if (provider !== undefined) aiConfig.provider = provider;
-  
-  // MERGE CUIDADOSO DE API KEYS
   if (apiKeys) {
-      aiConfig.apiKeys = {
-          ...aiConfig.apiKeys,
-          ...apiKeys
-      };
-      // Log mascarado para debug
-      if(apiKeys.gemini) console.log("Key Gemini atualizada: " + apiKeys.gemini.substring(0,5) + "...");
-      if(apiKeys.groq) console.log("Key Groq atualizada: " + apiKeys.groq.substring(0,5) + "...");
+      aiConfig.apiKeys = { ...aiConfig.apiKeys, ...apiKeys };
   }
-  
   try { 
       fs.writeFileSync(AI_CONFIG_PATH, JSON.stringify(aiConfig, null, 2)); 
-      console.log("[Config Update] Salvo no disco com sucesso.");
       res.json({ success: true, config: aiConfig }); 
-  } 
-  catch (e) { 
-      console.error("[Config Update] Erro ao salvar:", e);
+  } catch (e) { 
       res.status(500).json({ error: "Falha ao salvar" }); 
   }
 });
@@ -799,7 +788,6 @@ app.post('/api/campaigns', (req, res) => {
                      const placeholders = leads.map(() => '?').join(',');
                      db.run(`UPDATE resultado SET campaign_id = ?, campaign_status = 'queued' WHERE id IN (${placeholders})`,
                      [campaignId, ...leads], () => { 
-                         // Inicia o envio (mas retorna resposta HTTP rápido)
                          startCampaignSending(campaignId, initialMessage); 
                          res.json({ success: true, campaignId }); 
                      });
