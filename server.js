@@ -1,9 +1,8 @@
-
 import './polyfill.js'; // IMPORTANTE: Deve ser a primeira importação
 import 'dotenv/config';
 import express from 'express';
 import { createRequire } from 'module';
-const require = require(import.meta.url);
+const require = createRequire(import.meta.url);
 import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
@@ -365,7 +364,6 @@ client.on('message', async (msg) => {
                     });
                     finalText = chatCompletion.choices[0]?.message?.content || "";
                 } else {
-                    // Fix: Initialize GoogleGenAI with process.env.API_KEY as per GenAI SDK guidelines
                     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
                     const response = await ai.models.generateContent({ 
                         model: aiConfig.model || 'gemini-3-flash-preview',
@@ -399,19 +397,38 @@ function resumeQueues() {
 function startCampaignSending(campaignId, message) {
     const processQueue = () => {
         db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND campaign_status = 'queued' LIMIT 1`, [campaignId], async (err, lead) => {
-            if (err || !lead) return;
+            if (err) return console.error("[Campaign] Erro DB:", err);
+            if (!lead) return console.log(`[Campaign] Sem mais leads na fila para a campanha ${campaignId}`);
+            
+            // Se o cliente não estiver pronto, aguarda e tenta de novo em vez de marcar erro definitivo
+            if (!clientReady) {
+                console.log("[Campaign] WhatsApp Client não está pronto. Reagendando envio...");
+                return setTimeout(processQueue, 5000);
+            }
+
             let status = 'error';
-            if (lead.telefone && clientReady) {
+            if (lead.telefone) {
                  try {
                      const cleanPhone = lead.telefone.replace(/\D/g, '');
+                     // Garante que o número tem DDI (55 para Brasil)
                      const target = cleanPhone.length < 12 ? '55' + cleanPhone : cleanPhone;
                      await client.sendMessage(target + "@c.us", message);
                      status = 'sent';
-                     console.log(`[Campaign] Enviado para ${lead.razao_social} (${target})`);
-                 } catch (e) { console.error(`[Campaign] Erro ${lead.razao_social}:`, e.message); }
+                     console.log(`[Campaign] Mensagem enviada com sucesso para ${lead.razao_social} (${target})`);
+                 } catch (e) { 
+                     console.error(`[Campaign] Falha no envio para ${lead.razao_social}:`, e.message); 
+                     status = 'error';
+                 }
+            } else {
+                console.log(`[Campaign] Pulando ${lead.razao_social}: Telefone ausente.`);
+                status = 'skipped';
             }
-            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [status, new Date().toISOString(), lead.id], () => {
-                setTimeout(processQueue, Math.floor(Math.random() * 10000) + 10000);
+
+            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [status, new Date().toISOString(), lead.id], (updateErr) => {
+                if (updateErr) console.error("[Campaign] Erro ao atualizar status do lead:", updateErr);
+                // Intervalo aleatório para simular comportamento humano e evitar banimentos (10-20s)
+                const nextDelay = Math.floor(Math.random() * 10000) + 10000;
+                setTimeout(processQueue, nextDelay);
             });
         });
     };
