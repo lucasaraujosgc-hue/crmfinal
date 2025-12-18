@@ -64,6 +64,15 @@ const StatusBadge = ({ status }: { status: string }) => {
     return <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${map[status] || map['pending']}`}>{labels[status] || status}</span>;
 }
 
+// Fixed: Added missing getInitials helper function used in WhatsApp chat UI
+const getInitials = (name: string) => {
+  if (!name) return '?';
+  const parts = name.trim().split(' ').filter(p => p.length > 0);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+};
+
 const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh, compact = false }: any) => (
   <div className={`card-premium ${compact ? 'p-3' : 'p-5'} flex flex-col gap-4 mb-6 animate-fade-in shadow-sm border-slate-200/60 bg-white`}>
     {!compact && (
@@ -86,9 +95,9 @@ const FilterBar = React.memo(({ filters, setFilters, availableCities, availableR
         </div>
       </div>
     )}
-    <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${compact ? 'lg:grid-cols-4' : 'lg:grid-cols-6'} gap-3`}>
+    <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${compact ? 'lg:grid-cols-5' : 'lg:grid-cols-6'} gap-3`}>
       {compact && (
-        <div className="space-y-1 md:col-span-2 lg:col-span-1">
+        <div className="space-y-1 md:col-span-1">
           <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Busca Rápida</label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
@@ -116,19 +125,17 @@ const FilterBar = React.memo(({ filters, setFilters, availableCities, availableR
           {availableReasons.map((r: string) => <option key={r} value={r}>{r}</option>)}
         </select>
       </div>
-      {!compact && (
-        <div className="space-y-1">
-          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Status Campanha</label>
-          <select className="input-premium py-2 text-xs h-10" value={filters.statusWa} onChange={e => setFilters((p: any) => ({...p, statusWa: e.target.value}))}>
-            <option value="all">Todos Status</option>
-            <option value="pending">Pendente</option>
-            <option value="queued">Na Fila</option>
-            <option value="sent">Enviado</option>
-            <option value="replied">Respondeu</option>
-            <option value="error">Erro</option>
-          </select>
-        </div>
-      )}
+      <div className="space-y-1">
+        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Status Campanha</label>
+        <select className="input-premium py-2 text-xs h-10" value={filters.statusWa} onChange={e => setFilters((p: any) => ({...p, statusWa: e.target.value}))}>
+          <option value="all">Todos Status</option>
+          <option value="pending">Pendente</option>
+          <option value="queued">Na Fila</option>
+          <option value="sent">Enviado</option>
+          <option value="replied">Respondeu</option>
+          <option value="error">Erro</option>
+        </select>
+      </div>
       <div className="space-y-1">
         <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Telefone</label>
         <select className="input-premium py-2 text-xs h-10" value={filters.hasPhone} onChange={e => setFilters((p: any) => ({...p, hasPhone: e.target.value}))}>
@@ -137,20 +144,22 @@ const FilterBar = React.memo(({ filters, setFilters, availableCities, availableR
           <option value="no">Sem Telefone</option>
         </select>
       </div>
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Contador</label>
-        <select className="input-premium py-2 text-xs h-10" value={filters.hasAccountant} onChange={e => setFilters((p: any) => ({...p, hasAccountant: e.target.value}))}>
-          <option value="all">Qualquer</option>
-          <option value="yes">Com Contador</option>
-          <option value="no">Sem Contador</option>
-        </select>
-      </div>
+      {!compact && (
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Contador</label>
+          <select className="input-premium py-2 text-xs h-10" value={filters.hasAccountant} onChange={e => setFilters((p: any) => ({...p, hasAccountant: e.target.value}))}>
+            <option value="all">Qualquer</option>
+            <option value="yes">Com Contador</option>
+            <option value="no">Sem Contador</option>
+          </select>
+        </div>
+      )}
       <div className="flex items-end">
         <button 
           onClick={() => setFilters({ search: '', city: '', reason: '', hasAccountant: 'all', status: 'all', statusWa: 'all', hasPhone: 'all' })}
           className="text-[10px] font-bold text-rose-500 hover:text-rose-600 uppercase w-full pb-3 text-center"
         >
-          Limpar Filtros
+          Limpar
         </button>
       </div>
     </div>
@@ -265,19 +274,24 @@ const App: React.FC = () => {
   const deleteCampaign = async (id: string) => { if (confirm('Excluir esta campanha?')) { try { await fetch(`/api/campaigns/${id}`, { method: 'DELETE' }); fetchCampaigns(); fetchCompanies(); } catch (e) {} } };
   const deleteImport = async (id: string) => { if (confirm('Remover importação? Isso apagará os dados vinculados.')) { try { await fetch(`/api/imports/${id}`, { method: 'DELETE' }); fetchImports(); fetchCompanies(); } catch (e) {} } };
 
-  const filteredCompanies = useMemo(() => companies.filter(c => {
-    const s = !filters.search || 
-             c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) || 
-             c.cnpj?.includes(filters.search) ||
-             c.inscricaoEstadual?.includes(filters.search);
-    const ct = !filters.city || c.municipio === filters.city;
-    const rs = !filters.reason || (c.motivoSituacao && c.motivoSituacao.includes(filters.reason));
-    const acc = filters.hasAccountant === 'all' ? true : filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
-    const st = filters.status === 'all' ? true : c.status === filters.status;
-    const swa = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
-    const ph = filters.hasPhone === 'all' ? true : filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
-    return s && ct && rs && acc && st && swa && ph;
-  }), [companies, filters]);
+  const applyFilters = (list: CompanyResult[]) => {
+    return list.filter(c => {
+      const s = !filters.search || 
+               c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) || 
+               c.cnpj?.includes(filters.search) ||
+               c.inscricaoEstadual?.includes(filters.search);
+      const ct = !filters.city || c.municipio === filters.city;
+      const rs = !filters.reason || (c.motivoSituacao && c.motivoSituacao.includes(filters.reason));
+      const acc = filters.hasAccountant === 'all' ? true : filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+      const st = filters.status === 'all' ? true : c.status === filters.status;
+      const swa = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
+      const ph = filters.hasPhone === 'all' ? true : filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+      return s && ct && rs && acc && st && swa && ph;
+    });
+  };
+
+  const filteredCompanies = useMemo(() => applyFilters(companies), [companies, filters]);
+  const filteredCampaignLeads = useMemo(() => applyFilters(campaignLeads), [campaignLeads, filters]);
 
   const toggleSelection = (id: string) => { const n = new Set(selectedIds); if (n.has(id)) n.delete(id); else n.add(id); setSelectedIds(n); };
   const toggleSelectAllVisible = () => {
@@ -291,8 +305,6 @@ const App: React.FC = () => {
     }
     setSelectedIds(n);
   };
-
-  const getInitials = (name: string) => name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
@@ -310,7 +322,7 @@ const App: React.FC = () => {
             { id: 'import', icon: Upload, label: 'Importar PDF' }, 
             { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' }, 
             { id: 'campaigns', icon: Rocket, label: 'Gestão de Campanhas' }, 
-            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', badge: waSession.status==='connected'?'On':'Off' }, 
+            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp' }, 
             { id: 'knowledge', icon: BookOpen, label: 'Conhecimento IA' }, 
             { id: 'settings', icon: Settings, label: 'Configurações' }
           ].map(i => (
@@ -328,7 +340,7 @@ const App: React.FC = () => {
           <h1 className="text-xl font-black text-slate-800 tracking-tight uppercase">{activeTab.replace('-', ' ')}</h1>
           <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-100 rounded-full">
             <div className={`w-2 h-2 rounded-full ${waSession.status==='connected'?'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]':'bg-rose-500'}`}></div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase">{waSession.status==='connected'?'WhatsApp Conectado':'WhatsApp Desconectado'}</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase">{waSession.status==='connected'?'Online':'Desconectado'}</span>
           </div>
         </header>
 
@@ -379,23 +391,6 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className="card-premium overflow-hidden bg-white">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b">
-                    <tr><th className="px-6 py-4">Arquivo</th><th className="px-6 py-4">Data</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Ação</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {imports.map(i => (
-                      <tr key={i.id} className="hover:bg-slate-50">
-                        <td className="px-6 py-4 font-bold text-slate-700">{i.filename}</td>
-                        <td className="px-6 py-4 text-slate-500">{new Date(i.date).toLocaleDateString()}</td>
-                        <td className="px-6 py-4 text-xs font-bold text-brand-600">{i.total} Leads</td>
-                        <td className="px-6 py-4 text-right"><button onClick={() => deleteImport(i.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={18}/></button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </div>
           )}
 
@@ -435,9 +430,6 @@ const App: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
-                <div className="p-4 bg-slate-50 border-t flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  <span>{filteredCompanies.length} de {companies.length} registros</span>
-                </div>
               </div>
             </div>
           )}
@@ -465,7 +457,7 @@ const App: React.FC = () => {
                          </div>
                          <div className="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-widest pt-4 border-t border-slate-100">
                            <span>{new Date(c.created_at).toLocaleDateString()}</span>
-                           <span className="text-brand-600 flex items-center gap-1 group-hover:gap-2 transition-all">Gerenciar <ChevronRight size={12}/></span>
+                           <span className="text-brand-600 flex items-center gap-1 group-hover:gap-2 transition-all">Ver leads <ChevronRight size={12}/></span>
                          </div>
                        </div>
                      ))}
@@ -503,6 +495,7 @@ const App: React.FC = () => {
                                  <th className="p-4">IE</th>
                                  <th className="p-4">Cidade</th>
                                  <th className="p-4">Motivo</th>
+                                 <th className="p-4">Status WA</th>
                                </tr>
                              </thead>
                              <tbody className="divide-y divide-slate-100">
@@ -513,6 +506,7 @@ const App: React.FC = () => {
                                    <td className="p-4 text-slate-500 font-mono">{c.inscricaoEstadual}</td>
                                    <td className="p-4 text-slate-600">{c.municipio}</td>
                                    <td className="p-4 text-brand-600 font-bold max-w-[150px] truncate">{c.motivoSituacao}</td>
+                                   <td className="p-4"><StatusBadge status={c.campaignStatus} /></td>
                                  </tr>
                                ))}
                              </tbody>
@@ -617,20 +611,33 @@ const App: React.FC = () => {
                     </div>
                     <button onClick={() => setViewingCampaign(null)} className="p-2 hover:bg-slate-200 rounded-xl transition-colors"><X size={24}/></button>
                 </div>
+                <div className="p-4 bg-slate-50 border-b">
+                  <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} compact={true} />
+                </div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <table className="w-full text-xs text-left">
                         <thead className="bg-slate-100/80 sticky top-0 z-10 backdrop-blur-md">
-                          <tr><th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Empresa / CNPJ</th><th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Cidade</th><th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Status WA</th><th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Último Contato</th></tr>
+                          <tr>
+                            <th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Empresa / CNPJ</th>
+                            <th className="px-6 py-4 font-black text-slate-500 uppercase border-b">IE</th>
+                            <th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Cidade</th>
+                            <th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Status WA</th>
+                            <th className="px-6 py-4 font-black text-slate-500 uppercase border-b">Último Contato</th>
+                          </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {campaignLeads.map(lead => (
+                            {filteredCampaignLeads.map(lead => (
                                 <tr key={lead.id} className="hover:bg-slate-50">
                                     <td className="px-6 py-4"><div className="font-black text-slate-800">{lead.razaoSocial}</div><div className="text-[10px] text-slate-400 mt-0.5">{lead.cnpj}</div></td>
+                                    <td className="px-6 py-4 font-mono text-[11px] text-slate-500">{lead.inscricaoEstadual}</td>
                                     <td className="px-6 py-4 text-slate-600 font-medium">{lead.municipio}</td>
                                     <td className="px-6 py-4"><StatusBadge status={lead.campaignStatus} /></td>
                                     <td className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase">{lead.lastContacted ? new Date(lead.lastContacted).toLocaleString() : '-'}</td>
                                 </tr>
                             ))}
+                            {filteredCampaignLeads.length === 0 && (
+                                <tr><td colSpan={5} className="p-10 text-center text-slate-300 italic">Nenhum lead encontrado com os filtros atuais.</td></tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
