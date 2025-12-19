@@ -244,7 +244,11 @@ async function runScraping(filepath, processId) {
                     resultData.logradouro = extractByLabel(['Logradouro:']);
                     resultData.bairro_distrito = extractByLabel(['Bairro/Distrito:']);
                     resultData.cep = extractByLabel(['CEP:']);
-                    resultData.telefone = extractByLabel(['Telefone:']);
+                    
+                    // IMPORTANTE: Limpando o telefone para salvar apenas dígitos e facilitar a busca posterior
+                    const rawTel = extractByLabel(['Telefone:']);
+                    resultData.telefone = rawTel ? rawTel.replace(/\D/g, '') : '';
+                    
                     resultData.situacao_cadastral = extractByLabel(['Situação Cadastral Vigente:', 'Situa&ccedil;&atilde;o Cadastral Vigente:']).split('Data')[0].trim();
                     resultData.data_situacao_cadastral = extractByLabel(['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:']);
                     let motivo = extractByLabel(['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:']);
@@ -316,25 +320,42 @@ client.on('qr', (qr) => QRCode.toDataURL(qr, (err, url) => qrCodeData = url));
 client.on('ready', () => { console.log('WhatsApp Conectado!'); clientReady = true; qrCodeData = null; });
 
 client.on('message', async (msg) => {
-    let senderNumber = "";
-    try {
-        const contact = await msg.getContact();
-        senderNumber = contact.number || "";
-        if (!senderNumber) {
-            const chat = await msg.getChat();
-            if (!chat.isGroup) senderNumber = chat.id.user;
-        }
-    } catch(e) {}
-    
-    if (!senderNumber) senderNumber = msg.from.split('@')[0];
-    const cleanNumber = senderNumber.replace(/\D/g, '');
-    const phoneSuffix = cleanNumber.slice(-8);
-    
     if (msg.fromMe || msg.from.includes('status@broadcast') || msg.from.includes('@g.us')) return;
     if (!aiConfig.aiActive) return;
 
-    db.get(`SELECT * FROM resultado WHERE telefone LIKE ? ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix}`], async (err, company) => {
-            if (err || !company || company.ai_active === 0) return;
+    let senderNumber = "";
+    try {
+        const contact = await msg.getContact();
+        // Fallback robusto para números não salvos (LID/WID)
+        senderNumber = contact.id.user || msg.from.split('@')[0];
+        // Se ainda parecer um hash (LID), tenta a propriedade number
+        if (senderNumber.length > 15 && contact.number) {
+            senderNumber = contact.number;
+        }
+    } catch(e) {
+        senderNumber = msg.from.split('@')[0];
+    }
+    
+    const cleanSenderPhone = senderNumber.replace(/\D/g, '');
+    if (!cleanSenderPhone) return;
+
+    // Sufixos comuns para ignorar DDI e nono dígito em buscas parciais
+    const phoneSuffix8 = cleanSenderPhone.slice(-8);
+    
+    console.log(`[WA] Mensagem recebida de: ${msg.from} | Resolvido como: ${cleanSenderPhone}`);
+
+    // Busca o lead pelo telefone usando o sufixo de 8 dígitos para ser o mais flexível possível
+    db.get(`SELECT * FROM resultado WHERE (telefone LIKE ? OR telefone = ?) AND ai_active = 1 ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix8}`, cleanSenderPhone], async (err, company) => {
+            if (err) {
+                console.error('[DB] Erro ao buscar lead:', err);
+                return;
+            }
+            if (!company) {
+                console.log(`[WA] Lead não localizado na base para o número ${cleanSenderPhone}`);
+                return;
+            }
+
+            console.log(`[AI] Iniciando resposta para ${company.razao_social}`);
 
             let systemInstruction = aiConfig.persona;
             if (company.campaign_id) {
@@ -347,7 +368,7 @@ client.on('message', async (msg) => {
             if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
                 const matchedRule = aiConfig.knowledgeRules.find(rule => rule.isActive && company.motivo_situacao_cadastral.toLowerCase().includes(rule.motivoSituacao.toLowerCase()));
                 if (matchedRule) {
-                    contextData += `\n--- DIAGNÓSTICO ---\n`;
+                    contextData += `\n--- DIAGNÓSTICO E REGRAS ---\n`;
                     matchedRule.instructions.forEach(inst => contextData += `- ${inst.content}\n`);
                 }
             }
@@ -375,8 +396,14 @@ client.on('message', async (msg) => {
                     });
                     finalText = response.text;
                 }
-                if (finalText) await msg.reply(finalText);
-            } catch (error) { console.error('Gemini AI error:', error); }
+                if (finalText) {
+                    await msg.reply(finalText);
+                    // Atualiza o status do lead para 'replied' se ele respondeu
+                    db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ? AND campaign_status != 'replied'`, [company.id]);
+                }
+            } catch (error) { 
+                console.error('[AI] Erro ao gerar resposta:', error); 
+            }
         }
     );
 });
@@ -400,7 +427,7 @@ function startCampaignSending(campaignId, message) {
             if (err) return console.error("[Campaign] Erro DB:", err);
             if (!lead) return console.log(`[Campaign] Sem mais leads na fila para a campanha ${campaignId}`);
             
-            // Se o cliente não estiver pronto, aguarda e tenta de novo em vez de marcar erro definitivo
+            // Se o cliente não estiver pronto, aguarda e tenta de novo
             if (!clientReady) {
                 console.log("[Campaign] WhatsApp Client não está pronto. Reagendando envio...");
                 return setTimeout(processQueue, 5000);
@@ -411,7 +438,7 @@ function startCampaignSending(campaignId, message) {
                  try {
                      const cleanPhone = lead.telefone.replace(/\D/g, '');
                      // Garante que o número tem DDI (55 para Brasil)
-                     const target = cleanPhone.length < 12 ? '55' + cleanPhone : cleanPhone;
+                     const target = cleanPhone.length < 11 ? '55' + cleanPhone : cleanPhone;
                      await client.sendMessage(target + "@c.us", message);
                      status = 'sent';
                      console.log(`[Campaign] Mensagem enviada com sucesso para ${lead.razao_social} (${target})`);
@@ -426,7 +453,6 @@ function startCampaignSending(campaignId, message) {
 
             db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [status, new Date().toISOString(), lead.id], (updateErr) => {
                 if (updateErr) console.error("[Campaign] Erro ao atualizar status do lead:", updateErr);
-                // Intervalo aleatório para simular comportamento humano e evitar banimentos (10-20s)
                 const nextDelay = Math.floor(Math.random() * 10000) + 10000;
                 setTimeout(processQueue, nextDelay);
             });
