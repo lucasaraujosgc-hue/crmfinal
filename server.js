@@ -245,7 +245,6 @@ async function runScraping(filepath, processId) {
                     resultData.bairro_distrito = extractByLabel(['Bairro/Distrito:']);
                     resultData.cep = extractByLabel(['CEP:']);
                     
-                    // IMPORTANTE: Limpando o telefone para salvar apenas dígitos e facilitar a busca posterior
                     const rawTel = extractByLabel(['Telefone:']);
                     resultData.telefone = rawTel ? rawTel.replace(/\D/g, '') : '';
                     
@@ -323,39 +322,41 @@ client.on('message', async (msg) => {
     if (msg.fromMe || msg.from.includes('status@broadcast') || msg.from.includes('@g.us')) return;
     if (!aiConfig.aiActive) return;
 
-    let senderNumber = "";
+    let cleanSenderPhone = "";
     try {
         const contact = await msg.getContact();
-        // Fallback robusto para números não salvos (LID/WID)
-        senderNumber = contact.id.user || msg.from.split('@')[0];
-        // Se ainda parecer um hash (LID), tenta a propriedade number
-        if (senderNumber.length > 15 && contact.number) {
-            senderNumber = contact.number;
+        // A propriedade 'number' do contato geralmente contém o número de telefone real, 
+        // mesmo para contatos identificados por LID (não salvos).
+        if (contact.number) {
+            cleanSenderPhone = contact.number.replace(/\D/g, '');
+        } else {
+            // Fallback: tenta extrair do ID do remetente
+            cleanSenderPhone = (contact.id.user || msg.from.split('@')[0]).replace(/\D/g, '');
         }
     } catch(e) {
-        senderNumber = msg.from.split('@')[0];
+        cleanSenderPhone = msg.from.split('@')[0].replace(/\D/g, '');
     }
     
-    const cleanSenderPhone = senderNumber.replace(/\D/g, '');
     if (!cleanSenderPhone) return;
 
-    // Sufixos comuns para ignorar DDI e nono dígito em buscas parciais
+    // Sufixo para busca flexível (ignora DDI e nono dígito se necessário)
     const phoneSuffix8 = cleanSenderPhone.slice(-8);
     
-    console.log(`[WA] Mensagem recebida de: ${msg.from} | Resolvido como: ${cleanSenderPhone}`);
+    console.log(`[WA] Mensagem de: ${msg.from} | Telefone Resolvido: ${cleanSenderPhone}`);
 
-    // Busca o lead pelo telefone usando o sufixo de 8 dígitos para ser o mais flexível possível
-    db.get(`SELECT * FROM resultado WHERE (telefone LIKE ? OR telefone = ?) AND ai_active = 1 ORDER BY id DESC LIMIT 1`, [`%${phoneSuffix8}`, cleanSenderPhone], async (err, company) => {
+    // Tenta localizar o lead no banco. Usamos LIKE com o sufixo para máxima compatibilidade.
+    db.get(`SELECT * FROM resultado WHERE (telefone LIKE ? OR telefone = ?) AND ai_active = 1 ORDER BY id DESC LIMIT 1`, 
+           [`%${phoneSuffix8}`, cleanSenderPhone], async (err, company) => {
             if (err) {
                 console.error('[DB] Erro ao buscar lead:', err);
                 return;
             }
             if (!company) {
-                console.log(`[WA] Lead não localizado na base para o número ${cleanSenderPhone}`);
+                console.log(`[WA] Lead não localizado para o número ${cleanSenderPhone} (Sufixo: ${phoneSuffix8})`);
                 return;
             }
 
-            console.log(`[AI] Iniciando resposta para ${company.razao_social}`);
+            console.log(`[AI] Gerando resposta para: ${company.razao_social}`);
 
             let systemInstruction = aiConfig.persona;
             if (company.campaign_id) {
@@ -388,7 +389,7 @@ client.on('message', async (msg) => {
                     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
                     const response = await ai.models.generateContent({ 
                         model: aiConfig.model || 'gemini-3-flash-preview',
-                        contents: { parts: [{ text: msg.body || "Olá" }] },
+                        contents: [{ parts: [{ text: msg.body || "Olá" }] }],
                         config: { 
                           systemInstruction: systemInstruction + contextData, 
                           temperature: aiConfig.temperature || 0.7 
@@ -398,11 +399,10 @@ client.on('message', async (msg) => {
                 }
                 if (finalText) {
                     await msg.reply(finalText);
-                    // Atualiza o status do lead para 'replied' se ele respondeu
-                    db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ? AND campaign_status != 'replied'`, [company.id]);
+                    db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ?`, [company.id]);
                 }
             } catch (error) { 
-                console.error('[AI] Erro ao gerar resposta:', error); 
+                console.error('[AI] Erro:', error); 
             }
         }
     );
@@ -424,37 +424,23 @@ function resumeQueues() {
 function startCampaignSending(campaignId, message) {
     const processQueue = () => {
         db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND campaign_status = 'queued' LIMIT 1`, [campaignId], async (err, lead) => {
-            if (err) return console.error("[Campaign] Erro DB:", err);
-            if (!lead) return console.log(`[Campaign] Sem mais leads na fila para a campanha ${campaignId}`);
-            
-            // Se o cliente não estiver pronto, aguarda e tenta de novo
-            if (!clientReady) {
-                console.log("[Campaign] WhatsApp Client não está pronto. Reagendando envio...");
-                return setTimeout(processQueue, 5000);
-            }
+            if (err || !lead) return;
+            if (!clientReady) return setTimeout(processQueue, 5000);
 
             let status = 'error';
             if (lead.telefone) {
                  try {
                      const cleanPhone = lead.telefone.replace(/\D/g, '');
-                     // Garante que o número tem DDI (55 para Brasil)
                      const target = cleanPhone.length < 11 ? '55' + cleanPhone : cleanPhone;
                      await client.sendMessage(target + "@c.us", message);
                      status = 'sent';
-                     console.log(`[Campaign] Mensagem enviada com sucesso para ${lead.razao_social} (${target})`);
-                 } catch (e) { 
-                     console.error(`[Campaign] Falha no envio para ${lead.razao_social}:`, e.message); 
-                     status = 'error';
-                 }
+                 } catch (e) { status = 'error'; }
             } else {
-                console.log(`[Campaign] Pulando ${lead.razao_social}: Telefone ausente.`);
                 status = 'skipped';
             }
 
-            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [status, new Date().toISOString(), lead.id], (updateErr) => {
-                if (updateErr) console.error("[Campaign] Erro ao atualizar status do lead:", updateErr);
-                const nextDelay = Math.floor(Math.random() * 10000) + 10000;
-                setTimeout(processQueue, nextDelay);
+            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [status, new Date().toISOString(), lead.id], () => {
+                setTimeout(processQueue, Math.floor(Math.random() * 10000) + 10000);
             });
         });
     };
