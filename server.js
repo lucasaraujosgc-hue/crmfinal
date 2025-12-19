@@ -76,6 +76,7 @@ db.serialize(() => {
     uf TEXT,
     cep TEXT,
     telefone TEXT,
+    wa_id TEXT,
     email TEXT,
     atividade_economica_principal TEXT,
     condicao TEXT,
@@ -92,7 +93,9 @@ db.serialize(() => {
     FOREIGN KEY(campaign_id) REFERENCES campaign(id)
   )`, (err) => {
       if (!err) {
-          db.run("ALTER TABLE resultado ADD COLUMN ai_active INTEGER DEFAULT 1", (err) => {});
+          // Garante que as colunas novas existam caso o DB já tenha sido criado
+          db.run("ALTER TABLE resultado ADD COLUMN wa_id TEXT", (e) => {});
+          db.run("ALTER TABLE resultado ADD COLUMN ai_active INTEGER DEFAULT 1", (e) => {});
       }
       setTimeout(resumeQueues, 5000);
   });
@@ -322,38 +325,43 @@ client.on('message', async (msg) => {
     if (msg.fromMe || msg.from.includes('status@broadcast') || msg.from.includes('@g.us')) return;
     if (!aiConfig.aiActive) return;
 
+    let waId = msg.from; // O ID completo, ex: 123456789@c.us ou 248953954115815@lid
     let cleanSenderPhone = "";
+    
     try {
         const contact = await msg.getContact();
-        // A propriedade 'number' do contato geralmente contém o número de telefone real, 
-        // mesmo para contatos identificados por LID (não salvos).
+        // A propriedade 'number' do contato geralmente contém o número real para contatos salvos,
+        // mas o 'id._serialized' é o que realmente identifica a conversa.
         if (contact.number) {
             cleanSenderPhone = contact.number.replace(/\D/g, '');
         } else {
-            // Fallback: tenta extrair do ID do remetente
             cleanSenderPhone = (contact.id.user || msg.from.split('@')[0]).replace(/\D/g, '');
         }
     } catch(e) {
         cleanSenderPhone = msg.from.split('@')[0].replace(/\D/g, '');
     }
     
-    if (!cleanSenderPhone) return;
+    if (!cleanSenderPhone && !waId) return;
 
-    // Sufixo para busca flexível (ignora DDI e nono dígito se necessário)
-    const phoneSuffix8 = cleanSenderPhone.slice(-8);
+    const phoneSuffix8 = cleanSenderPhone.length >= 8 ? cleanSenderPhone.slice(-8) : cleanSenderPhone;
     
-    console.log(`[WA] Mensagem de: ${msg.from} | Telefone Resolvido: ${cleanSenderPhone}`);
+    console.log(`[WA] Mensagem de: ${msg.from} | Resolvido: ${cleanSenderPhone}`);
 
-    // Tenta localizar o lead no banco. Usamos LIKE com o sufixo para máxima compatibilidade.
-    db.get(`SELECT * FROM resultado WHERE (telefone LIKE ? OR telefone = ?) AND ai_active = 1 ORDER BY id DESC LIMIT 1`, 
-           [`%${phoneSuffix8}`, cleanSenderPhone], async (err, company) => {
+    // Busca o lead priorizando o wa_id (vínculo exato) e depois o telefone
+    db.get(`SELECT * FROM resultado WHERE (wa_id = ? OR telefone LIKE ? OR telefone = ?) AND ai_active = 1 ORDER BY id DESC LIMIT 1`, 
+           [waId, `%${phoneSuffix8}`, cleanSenderPhone], async (err, company) => {
             if (err) {
                 console.error('[DB] Erro ao buscar lead:', err);
                 return;
             }
             if (!company) {
-                console.log(`[WA] Lead não localizado para o número ${cleanSenderPhone} (Sufixo: ${phoneSuffix8})`);
+                console.log(`[WA] Lead não localizado para ${msg.from} (Resolvido: ${cleanSenderPhone})`);
                 return;
+            }
+
+            // Atualiza o wa_id se ainda não estiver preenchido para este lead
+            if (!company.wa_id) {
+                db.run(`UPDATE resultado SET wa_id = ? WHERE id = ?`, [waId, company.id]);
             }
 
             console.log(`[AI] Gerando resposta para: ${company.razao_social}`);
@@ -428,18 +436,28 @@ function startCampaignSending(campaignId, message) {
             if (!clientReady) return setTimeout(processQueue, 5000);
 
             let status = 'error';
+            let waIdToStore = null;
+
             if (lead.telefone) {
                  try {
                      const cleanPhone = lead.telefone.replace(/\D/g, '');
                      const target = cleanPhone.length < 11 ? '55' + cleanPhone : cleanPhone;
-                     await client.sendMessage(target + "@c.us", message);
+                     
+                     // O envio para number@c.us é o gatilho, mas o WhatsApp pode responder com um ID LID.
+                     // Capturamos o ID de destino exato da mensagem enviada.
+                     const sentMsg = await client.sendMessage(target + "@c.us", message);
+                     waIdToStore = sentMsg.to; // Ex: 248953954115815@lid ou 5571988776655@c.us
                      status = 'sent';
-                 } catch (e) { status = 'error'; }
+                 } catch (e) { 
+                     console.error(`[Campaign] Erro ao enviar para ${lead.razao_social}:`, e.message);
+                     status = 'error'; 
+                 }
             } else {
                 status = 'skipped';
             }
 
-            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ? WHERE id = ?`, [status, new Date().toISOString(), lead.id], () => {
+            db.run(`UPDATE resultado SET campaign_status = ?, last_contacted = ?, wa_id = ? WHERE id = ?`, 
+                   [status, new Date().toISOString(), waIdToStore, lead.id], () => {
                 setTimeout(processQueue, Math.floor(Math.random() * 10000) + 10000);
             });
         });
