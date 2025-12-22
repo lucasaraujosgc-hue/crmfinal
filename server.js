@@ -324,12 +324,27 @@ client.on('message', async (msg) => {
     if (msg.fromMe || msg.from.includes('status@broadcast') || msg.from.includes('@g.us')) return;
     if (!aiConfig.aiActive) return;
 
-    let waId = msg.from; // ID original (pode ser @lid ou @c.us)
+    // --- NOVA TRAVA DE CONTEÚDO ---
+    const lowerBody = (msg.body || "").toLowerCase();
+    const forbiddenPhrases = [
+        "que posso te ajuda", 
+        "como posso te ajuda", 
+        "posso te ajuda?", 
+        "posso te ajudar?",
+        "mensagem automática",
+        "horário de atendimento"
+    ];
+
+    if (forbiddenPhrases.some(phrase => lowerBody.includes(phrase))) {
+        console.log(`[WA] Ignorando auto-reply detectado pelo conteúdo: "${msg.body}"`);
+        return;
+    }
+
+    let waId = msg.from;
     let cleanSenderPhone = "";
     
     try {
         const contact = await msg.getContact();
-        // contact.number geralmente tem o telefone real se o servidor resolveu o LID
         if (contact.number) {
             cleanSenderPhone = contact.number.replace(/\D/g, '');
         } else {
@@ -341,19 +356,15 @@ client.on('message', async (msg) => {
     
     if (!cleanSenderPhone && !waId) return;
 
-    // Busca o lead priorizando o ID exato (wa_id) salvo no momento do envio
+    // Busca o lead priorizando o ID exato (wa_id) salvo no momento do envio da campanha
     db.get(`SELECT * FROM resultado WHERE (wa_id = ? OR wa_id = ? OR telefone LIKE ? OR telefone = ?) AND ai_active = 1 ORDER BY id DESC LIMIT 1`, 
            [waId, waId.replace('@lid', '@c.us'), `%${cleanSenderPhone.slice(-8)}`, cleanSenderPhone], async (err, company) => {
-            if (err) {
-                console.error('[DB] Erro:', err);
-                return;
-            }
-            if (!company) {
+            if (err || !company) {
                 console.log(`[WA] Lead não localizado para ${waId} (Resolvido: ${cleanSenderPhone})`);
                 return;
             }
 
-            // Garante o vínculo do wa_id para futuras mensagens
+            // Atualiza vínculo do ID se necessário
             if (!company.wa_id || company.wa_id !== waId) {
                 db.run(`UPDATE resultado SET wa_id = ? WHERE id = ?`, [waId, company.id]);
             }
@@ -401,7 +412,7 @@ client.on('message', async (msg) => {
                 }
                 if (finalText) {
                     await msg.reply(finalText);
-                    db.run(`UPDATE resultado SET campaign_status = 'replied' WHERE id = ?`, [company.id]);
+                    db.run(`UPDATE resultado SET campaign_status = 'replied', last_contacted = ? WHERE id = ?`, [new Date().toISOString(), company.id]);
                 }
             } catch (error) { 
                 console.error('[AI] Erro:', error); 
@@ -437,8 +448,7 @@ function startCampaignSending(campaignId, message) {
                      const cleanPhone = lead.telefone.replace(/\D/g, '');
                      const target = cleanPhone.length < 11 ? '55' + cleanPhone : cleanPhone;
                      
-                     // RESOLUÇÃO DE IDENTIDADE: Pergunta ao WhatsApp o ID correto do número
-                     // Isso retorna o @lid se o contato não estiver salvo.
+                     // Pergunta ao WhatsApp qual o ID correto deste número (resolve LID/WID)
                      const numberId = await client.getNumberId(target);
                      const actualTarget = numberId ? numberId._serialized : target + "@c.us";
                      
