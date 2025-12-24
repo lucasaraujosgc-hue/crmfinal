@@ -7,7 +7,10 @@ import {
   BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
   ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu
 } from 'lucide-react';
-import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
+import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -380,6 +383,7 @@ const App: React.FC = () => {
   
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [availableReasons, setAvailableReasons] = useState<string[]>([]);
+  const [rawDatabaseReasons, setRawDatabaseReasons] = useState<string[]>([]); // Motivos crus do banco
 
   // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -482,6 +486,7 @@ const App: React.FC = () => {
         setAvailableCities((data.municipios as string[]) || []);
         
         if (data.motivos) {
+             setRawDatabaseReasons(data.motivos); // Salva os motivos crus para o editor de regras
              const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
              setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
         } else {
@@ -574,9 +579,11 @@ const App: React.FC = () => {
         
       const cityMatch = !filters.city || c.municipio === filters.city;
       
-      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
+      const rawLeadReason = c.motivoSituacao || '';
+      const cleanedLeadReason = cleanReasonText(rawLeadReason);
       const reasonMatch = !filters.reason || 
-        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase()));
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
+        (rawLeadReason && rawLeadReason.toLowerCase().includes(filters.reason.toLowerCase()));
         
       const accountantMatch = filters.hasAccountant === 'all' ? true :
         filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
@@ -864,19 +871,19 @@ const App: React.FC = () => {
                                  <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wide">Motivo SEFAZ (Banco de Dados)</label>
                                  <div className="relative">
                                      <input 
-                                        list="reasons-list"
+                                        list="db-reasons-list"
                                         className="input-premium border-brand-200 focus:border-brand-500" 
-                                        placeholder="Selecione o motivo exato..."
+                                        placeholder="Selecione o motivo exato do banco de dados..."
                                         value={editingRule.motivoSituacao}
                                         onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
                                      />
-                                     <datalist id="reasons-list">
-                                        {availableReasons.map((r: string, idx: number) => (
+                                     <datalist id="db-reasons-list">
+                                        {rawDatabaseReasons.map((r: string, idx: number) => (
                                             <option key={idx} value={r} />
                                         ))}
                                      </datalist>
                                  </div>
-                                 <p className="text-xs text-slate-400 mt-2">Dica: Use a lista suspensa para garantir que a IA identifique o lead corretamente.</p>
+                                 <p className="text-xs text-slate-400 mt-2">Dica: Utilize a lista suspensa para garantir que a IA identifique o lead corretamente no momento do contato.</p>
                              </div>
                              
                              <div>
