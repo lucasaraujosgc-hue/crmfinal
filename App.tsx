@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
@@ -6,10 +7,7 @@ import {
   BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
   ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from 'recharts';
-import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
+import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -54,10 +52,8 @@ function useInterval(callback: () => void, delay: number | null) {
 
 // --- HELPERS ---
 
-// Limpa o motivo removendo o endereço de correspondência
 const cleanReasonText = (text: string | null | undefined) => {
     if (!text) return '';
-    // Corta nas palavras chaves comuns de endereço da SEFAZ
     return text.split('Endereço de Correspondência')[0]
                .split('Endereço:')[0]
                .split('Endereco de Correspondencia')[0]
@@ -166,15 +162,10 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
               )}
               <td className="px-6 py-4">
                 <div className="flex flex-col gap-1.5">
-                    {/* Razão Social em Destaque */}
                     <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
-                    
-                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
                     {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
                          <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
                     )}
-                    
-                    {/* Badges de IDs */}
                     <div className="flex flex-wrap gap-1.5 mt-1">
                         <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
                            CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
@@ -183,8 +174,6 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                            IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
                         </span>
                     </div>
-
-                    {/* Data da Situação movida para cá */}
                     {company.dataSituacaoCadastral && (
                         <div className="flex items-center gap-1 mt-1 text-rose-600">
                             <AlertCircle size={10} />
@@ -270,12 +259,11 @@ const KanbanCard: React.FC<{ company: CompanyResult, onClick: () => void }> = ({
         <p className="text-xs text-slate-500 mb-2 truncate">{company.municipio}</p>
         <div className="flex justify-between items-center border-t border-slate-50 pt-2">
              <StatusBadge status={company.campaignStatus} />
-             <span className="text-[10px] text-slate-400">{new Date().toLocaleDateString()}</span>
         </div>
     </div>
 );
 
-const KanbanColumn = ({ title, status, companies, onMove, onCardClick }: any) => {
+const KanbanColumn = ({ title, status, companies, onCardClick }: any) => {
     return (
         <div className="min-w-[280px] w-[280px] flex flex-col h-full bg-slate-100/50 rounded-2xl border border-slate-200/60 flex-shrink-0">
             <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/50 rounded-t-2xl">
@@ -379,10 +367,6 @@ const App: React.FC = () => {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
 
-  // Import Process State
-  const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
-  const [processProgress, setProcessProgress] = useState({ total: 0, processed: 0, status: '' });
-
   // Filters State
   const [filters, setFilters] = useState({
     search: '',
@@ -390,7 +374,7 @@ const App: React.FC = () => {
     reason: '',
     hasAccountant: 'all',
     status: 'all',
-    statusWa: 'all', // Added WhatsApp Status Filter
+    statusWa: 'all', 
     hasPhone: 'all'
   });
   
@@ -399,8 +383,6 @@ const App: React.FC = () => {
 
   // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  
-  // Kanban Selection
   const [selectedKanbanLead, setSelectedKanbanLead] = useState<CompanyResult | null>(null);
 
   // Campaign Wizard State
@@ -415,7 +397,7 @@ const App: React.FC = () => {
 
   // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     provider: 'gemini',
     apiKeys: { gemini: '', groq: '' },
     persona: DEFAULT_AI_PERSONA,
@@ -437,18 +419,10 @@ const App: React.FC = () => {
   // Initial Load
   useEffect(() => {
     fetchCompanies();
-    fetchImports();
     fetchFilters();
     fetchCampaigns();
     fetchAiConfig();
   }, []);
-
-  useEffect(() => {
-    setSelectedIds(new Set());
-    setIsCreatingCampaign(false);
-    setCampaignStep(1);
-    setSelectedKanbanLead(null);
-  }, [activeTab]);
 
   useInterval(() => {
     fetchWhatsAppStatus();
@@ -457,45 +431,6 @@ const App: React.FC = () => {
       if (activeChat) fetchMessages(activeChat);
     }
   }, 3000);
-
-  // Progress Polling for Import
-  useInterval(() => {
-    if (currentProcessId) {
-      fetch(`/progress/${currentProcessId}`)
-        .then(res => {
-           const reader = res.body?.getReader();
-           return new ReadableStream({
-             start(controller) {
-               function push() {
-                 reader?.read().then(({ done, value }) => {
-                   if (done) { controller.close(); return; }
-                   const chunk = new TextDecoder("utf-8").decode(value);
-                   const lines = chunk.split('\n\n');
-                   lines.forEach(line => {
-                     if (line.startsWith('data: ')) {
-                       try {
-                         const data = JSON.parse(line.replace('data: ', ''));
-                         if (data.status === 'not_found') return;
-                         setProcessProgress(data);
-                         if (data.status === 'completed' || data.status === 'error') {
-                           fetchCompanies(); 
-                           fetchImports();
-                           fetchFilters(); 
-                           setTimeout(() => setCurrentProcessId(null), 3000);
-                         }
-                       } catch (e) {}
-                     }
-                   });
-                   push();
-                 });
-               }
-               push();
-             }
-           });
-        })
-        .catch(console.error);
-    }
-  }, currentProcessId ? 1000 : null);
 
   const fetchAiConfig = async () => {
       try {
@@ -520,14 +455,14 @@ const App: React.FC = () => {
                   model: newConfig.model,
                   aiActive: newConfig.aiActive,
                   provider: newConfig.provider,
-                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
+                  apiKeys: newConfig.apiKeys
               })
           });
           
           if (res.ok) {
               const data = await res.json();
-              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
-              alert('Configurações salvas e aplicadas com sucesso!');
+              setAiConfig(data.config || newConfig);
+              alert('Configurações salvas com sucesso!');
           } else {
               alert('Erro ao salvar no servidor.');
           }
@@ -538,19 +473,6 @@ const App: React.FC = () => {
           setIsSavingConfig(false);
       }
   }
-
-  const cleanupOrphanedData = async () => {
-      if(!confirm("Isso apagará empresas que não têm um arquivo de importação vinculado (Ex: uploads interrompidos). Continuar?")) return;
-      try {
-          const res = await fetch('/api/cleanup', { method: 'POST' });
-          if(res.ok) {
-              alert('Limpeza concluída!');
-              fetchCompanies();
-          }
-      } catch (e) { alert('Erro ao limpar'); }
-  }
-
-  // --- API Calls ---
 
   const fetchFilters = async () => {
     try {
@@ -576,19 +498,6 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); }
   };
 
-  const deleteCampaign = async (id: string) => {
-      if(!confirm("Tem certeza que deseja excluir esta campanha? Os leads voltarão para o status pendente.")) return;
-      try {
-          const res = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
-          if(res.ok) {
-              fetchCampaigns();
-              fetchCompanies();
-          } else {
-              alert("Erro ao excluir campanha");
-          }
-      } catch (e) { alert("Erro de conexão"); }
-  }
-
   const fetchCompanies = async () => {
     try {
       const res = await fetch('/get-all-results');
@@ -600,25 +509,6 @@ const App: React.FC = () => {
         setStats({ total: data.length, processed: data.length, success, errors });
       }
     } catch (error) { console.error(error); } 
-  };
-
-  const fetchImports = async () => {
-    try {
-      const res = await fetch('/get-imports');
-      if (res.ok) setImports(await res.json());
-    } catch (e) { console.error(e); }
-  };
-
-  const deleteImport = async (id: string) => {
-      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
-      try {
-          await fetch(`/api/imports/${id}`, { method: 'DELETE' });
-          // Short delay to ensure scraping stopped and DB cleared
-          setTimeout(() => {
-              fetchImports();
-              fetchCompanies();
-          }, 1000);
-      } catch(e) { alert('Erro ao deletar'); }
   };
 
   const fetchWhatsAppStatus = async () => {
@@ -661,47 +551,6 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
-  const createCampaign = async () => {
-      if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione empresas e dê um nome à campanha.');
-      
-      try {
-          const res = await fetch('/api/campaigns', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  ...newCampaign,
-                  leads: Array.from(selectedIds)
-              })
-          });
-          if (res.ok) {
-              alert('Campanha criada e envios iniciados!');
-              setIsCreatingCampaign(false);
-              // Reset again just in case
-              setNewCampaign({
-                  name: '',
-                  description: '',
-                  initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
-                  aiPersona: DEFAULT_AI_PERSONA
-              });
-              fetchCampaigns();
-              fetchCompanies();
-          } else {
-              alert('Erro ao criar campanha');
-          }
-      } catch (e) { alert('Erro de conexão'); }
-  };
-
-  const updateLeadStatus = async (id: string, status: string) => {
-      try {
-          await fetch('/api/leads/status', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ id, status })
-          });
-          fetchCompanies();
-      } catch(e) { console.error(e); }
-  };
-
   const toggleLeadAI = async (id: string, currentStatus: boolean | undefined) => {
       const newStatus = !currentStatus;
       try {
@@ -710,7 +559,6 @@ const App: React.FC = () => {
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({ id, active: newStatus })
           });
-          // Update local state to reflect change immediately
           setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
       } catch(e) { console.error(e); }
   };
@@ -728,8 +576,7 @@ const App: React.FC = () => {
       
       const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
       const reasonMatch = !filters.reason || 
-        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
-        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase()));
         
       const accountantMatch = filters.hasAccountant === 'all' ? true :
         filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
@@ -769,49 +616,21 @@ const App: React.FC = () => {
           setActiveTab('whatsapp');
           setActiveChat(chatId);
           fetchMessages(chatId);
-          setSelectedKanbanLead(null); // Close modal
+          setSelectedKanbanLead(null);
       } else {
           alert('Empresa sem telefone cadastrado.');
       }
   };
 
-  // Handler to reset and open campaign wizard
-  const handleOpenNewCampaign = () => {
-      setNewCampaign({
-          name: '',
-          description: '',
-          initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
-          aiPersona: DEFAULT_AI_PERSONA
-      });
-      setSelectedIds(new Set());
-      setCampaignStep(1);
-      setIsCreatingCampaign(true);
-  };
-
-  // --- Render ---
-
-  // Helper to find company in active chat
   const activeChatCompany = useMemo(() => {
       if (!activeChat || companies.length === 0) return null;
-      
-      // 1. Try to clean the ID (only digits)
       const cleanChatId = activeChat.replace(/\D/g, '');
-      
-      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
-      // This solves the @lid issue where the ID is not the phone number
-      const currentChatObj = chats.find(c => c.id === activeChat);
-      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
-
       return companies.find(c => {
           if (!c.telefone) return false;
           const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
-          
-          // Match against ID digits OR Name digits
-          return cleanChatId.includes(cleanCompanyPhone) || 
-                 cleanCompanyPhone.includes(cleanChatId) ||
-                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
+          return cleanChatId.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(cleanChatId);
       });
-  }, [activeChat, companies, chats]);
+  }, [activeChat, companies]);
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -864,24 +683,6 @@ const App: React.FC = () => {
             </button>
           ))}
         </nav>
-
-        {/* Global AI Toggle in Sidebar */}
-        {isSidebarOpen && (
-            <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Bot size={18} className={aiConfig.aiActive ? "text-emerald-400" : "text-slate-400"} />
-                        <span className="text-sm font-medium">IA Geral</span>
-                    </div>
-                    <button 
-                        onClick={() => saveAiConfig({...aiConfig, aiActive: !aiConfig.aiActive})}
-                        className={`w-10 h-5 rounded-full flex items-center transition-all p-1 ${aiConfig.aiActive ? 'bg-emerald-500 justify-end' : 'bg-slate-600 justify-start'}`}
-                    >
-                        <div className="w-3 h-3 bg-white rounded-full shadow-md"></div>
-                    </button>
-                </div>
-            </div>
-        )}
       </aside>
 
       {/* Main Content */}
@@ -890,9 +691,7 @@ const App: React.FC = () => {
           <h1 className="text-2xl font-bold text-slate-800">
             {activeTab === 'dashboard' && 'Visão Geral'}
             {activeTab === 'kanban' && 'Gestão de Atendimentos'}
-            {activeTab === 'import' && 'Importação de Dados'}
             {activeTab === 'companies' && 'Base de Empresas'}
-            {activeTab === 'campaigns' && 'Campanhas de Marketing'}
             {activeTab === 'whatsapp' && 'Atendimento'}
             {activeTab === 'knowledge' && 'Base de Conhecimento'}
             {activeTab === 'settings' && 'Configurações'}
@@ -901,7 +700,6 @@ const App: React.FC = () => {
 
         <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
           
-          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -916,94 +714,6 @@ const App: React.FC = () => {
                     <h3 className="text-3xl font-bold text-slate-700">{stat.value}</h3>
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'import' && (
-            <div className="space-y-8">
-              {!currentProcessId && (
-                <div className="max-w-xl mx-auto card-premium p-10 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-all group cursor-pointer relative bg-white">
-                  <input 
-                    type="file" 
-                    accept=".pdf" 
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const formData = new FormData();
-                      formData.append('file', file);
-                      try {
-                        const res = await fetch('/start-processing', { method: 'POST', body: formData });
-                        if (res.ok) {
-                          const { processId } = await res.json();
-                          setCurrentProcessId(processId);
-                        } else {
-                          alert('Erro ao enviar arquivo.');
-                        }
-                      } catch (err) { console.error(err); alert('Erro de conexão.'); }
-                    }}
-                  />
-                  <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
-                    <Upload size={40} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Nova Importação SEFAZ</h3>
-                  <p className="text-slate-500 text-lg">Arraste o PDF ou clique para selecionar</p>
-                </div>
-              )}
-
-              {currentProcessId && (
-                <div className="max-w-2xl mx-auto card-premium p-8 text-center animate-fade-in">
-                  <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                    <RefreshCw size={32} className="animate-spin" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-800 mb-2">Processando PDF...</h3>
-                  <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden mb-2">
-                    <div 
-                      className={`bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out`}
-                      style={{ width: `${processProgress.total > 0 ? (processProgress.processed / processProgress.total) * 100 : 0}%` }}
-                    />
-                  </div>
-                  <p className="text-sm font-medium text-slate-600">
-                    {processProgress.processed} de {processProgress.total} empresas consultadas
-                  </p>
-                </div>
-              )}
-
-              <div className="card-premium p-6">
-                  <h3 className="text-lg font-bold mb-4 text-slate-800">Gerenciador de Arquivos</h3>
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-sm text-left">
-                          <thead className="bg-slate-50 text-slate-600 font-medium">
-                              <tr>
-                                  <th className="px-4 py-3">Nome do Arquivo</th>
-                                  <th className="px-4 py-3">Data Importação</th>
-                                  <th className="px-4 py-3">Total Registros</th>
-                                  <th className="px-4 py-3">Status</th>
-                                  <th className="px-4 py-3 text-right">Ações</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                              {imports.map(imp => (
-                                  <tr key={imp.id} className="hover:bg-slate-50">
-                                      <td className="px-4 py-3 font-medium text-slate-800">{imp.filename}</td>
-                                      <td className="px-4 py-3 text-slate-500">{new Date(imp.date).toLocaleDateString()}</td>
-                                      <td className="px-4 py-3 text-slate-600">{imp.total}</td>
-                                      <td className="px-4 py-3">
-                                          <span className={`text-xs px-2 py-1 rounded-full ${imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                              {imp.status === 'completed' ? 'Sucesso' : imp.status}
-                                          </span>
-                                      </td>
-                                      <td className="px-4 py-3 text-right">
-                                          <button onClick={() => deleteImport(imp.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg">
-                                              <Trash2 size={16}/>
-                                          </button>
-                                      </td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
-                  </div>
               </div>
             </div>
           )}
@@ -1055,12 +765,6 @@ const App: React.FC = () => {
                         companies={filteredCompanies.filter(c => c.campaignStatus === 'interested')} 
                         onCardClick={setSelectedKanbanLead}
                       />
-                       <KanbanColumn 
-                        title="Descartados" 
-                        status="not_interested" 
-                        companies={filteredCompanies.filter(c => c.campaignStatus === 'not_interested' || c.campaignStatus === 'skipped' || c.campaignStatus === 'error')} 
-                        onCardClick={setSelectedKanbanLead}
-                      />
                   </div>
                   <SelectedLeadModal 
                     company={selectedKanbanLead} 
@@ -1070,290 +774,67 @@ const App: React.FC = () => {
               </div>
           )}
 
-          {activeTab === 'campaigns' && (
-            <div className="space-y-6">
-               {!isCreatingCampaign ? (
-                   <div className="space-y-6">
-                       <div className="flex justify-between items-center">
-                           <h2 className="text-xl font-bold text-slate-700">Minhas Campanhas</h2>
-                           <button onClick={handleOpenNewCampaign} className="btn-primary flex items-center gap-2">
-                               <Plus size={18}/> Nova Campanha
-                           </button>
-                       </div>
-                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                           {campaigns.map(c => (
-                               <div key={c.id} className="card-premium p-6 group relative">
-                                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                       <button onClick={() => deleteCampaign(c.id)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg">
-                                           <Trash2 size={18}/>
-                                       </button>
-                                   </div>
-                                   <div className="flex justify-between items-start mb-4">
-                                       <div className="p-3 bg-brand-50 text-brand-600 rounded-xl">
-                                           <Rocket size={24}/>
-                                       </div>
-                                       <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full uppercase">Ativa</span>
-                                   </div>
-                                   <h3 className="font-bold text-lg text-slate-800 mb-2">{c.name}</h3>
-                                   <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-4">
-                                       <div><p className="text-xs text-slate-400">Total</p><p className="font-bold">{c.stats?.total || 0}</p></div>
-                                       <div><p className="text-xs text-slate-400">Enviados</p><p className="font-bold text-brand-600">{c.stats?.sent || 0}</p></div>
-                                       <div><p className="text-xs text-slate-400">Respostas</p><p className="font-bold text-emerald-600">{c.stats?.replied || 0}</p></div>
-                                   </div>
-                               </div>
-                           ))}
-                       </div>
-                   </div>
-               ) : (
-                   <div className="max-w-5xl mx-auto">
-                       <div className="mb-8 flex items-center justify-between">
-                           <div><h2 className="text-2xl font-bold text-slate-800">Criar Nova Campanha</h2></div>
-                           <button onClick={() => setIsCreatingCampaign(false)}><X size={24}/></button>
-                       </div>
-                       <div className="card-premium p-8">
-                           {campaignStep === 1 && (
-                               <div className="max-w-xl mx-auto space-y-6">
-                                   <input className="input-premium" placeholder="Nome da Campanha" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} />
-                                   <textarea className="input-premium h-32" placeholder="Descrição" value={newCampaign.description} onChange={e => setNewCampaign({...newCampaign, description: e.target.value})} />
-                                   <button onClick={() => setCampaignStep(2)} className="btn-primary w-full">Próximo</button>
-                               </div>
-                           )}
-                           {campaignStep === 2 && (
-                               <div className="space-y-4">
-                                   <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
-                                   <div className="h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
-                                      <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} toggleSelectAll={toggleSelectAll} selectable={true} onToggleAi={toggleLeadAI} />
-                                   </div>
-                                   <div className="flex justify-between pt-4">
-                                       <button onClick={() => setCampaignStep(1)} className="btn-secondary">Voltar</button>
-                                       <button onClick={() => setCampaignStep(3)} className="btn-primary" disabled={selectedIds.size === 0}>Próximo ({selectedIds.size})</button>
-                                   </div>
-                               </div>
-                           )}
-                           {campaignStep === 3 && (
-                               <div className="grid grid-cols-2 gap-8">
-                                   <textarea className="input-premium h-64" value={newCampaign.initialMessage} onChange={e => setNewCampaign({...newCampaign, initialMessage: e.target.value})} />
-                                   <textarea className="input-premium h-64" value={newCampaign.aiPersona} onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})} />
-                                   <button onClick={createCampaign} className="btn-primary col-span-2">Disparar</button>
-                               </div>
-                           )}
-                       </div>
-                   </div>
-               )}
-            </div>
-          )}
-
-          {/* --- WHATSAPP TAB --- */}
+          {/* WhatsApp Tab */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6">
-              {/* Sidebar List */}
               <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
                 <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                    <div className="flex items-center gap-2">
-                       <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
-                           <User size={20} />
-                       </div>
                        <h3 className="font-bold text-slate-700">Conversas</h3>
                    </div>
-                   <div className="flex gap-2">
-                        <div className={`w-3 h-3 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`} title={waSession.status}></div>
-                   </div>
+                   <div className={`w-3 h-3 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
                 </div>
                 
-                {waSession.status !== 'connected' && waSession.qrCode ? (
-                    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50/50">
-                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
-                            <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mix-blend-multiply" />
-                        </div>
-                        <p className="text-sm font-medium text-slate-600 animate-pulse flex items-center gap-2">
-                            <Phone size={16}/> Escaneie para conectar
-                        </p>
-                    </div>
-                ) : (
-                    <div className="flex-1 overflow-y-auto custom-scrollbar">
-                        {chats.map(chat => (
-                            <div 
-                                key={chat.id} 
-                                onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} 
-                                className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex gap-3 ${activeChat === chat.id ? 'bg-slate-100' : ''}`}
-                            >
-                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-100 to-brand-200 flex-shrink-0 flex items-center justify-center text-brand-600 font-bold text-sm">
-                                    {getInitials(chat.name || 'Unknown')}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex justify-between items-baseline mb-1">
-                                        <h4 className="font-semibold text-slate-800 text-sm truncate">{chat.name || chat.id.split('@')[0]}</h4>
-                                        <span className="text-[10px] text-slate-400 font-medium">{formatTime(chat.timestamp)}</span>
-                                    </div>
-                                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
-                                </div>
-                                {chat.unreadCount > 0 && (
-                                    <div className="flex flex-col justify-center">
-                                        <span className="bg-emerald-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
-                                            {chat.unreadCount}
-                                        </span>
-                                    </div>
-                                )}
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                    {chats.map(chat => (
+                        <div key={chat.id} onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex gap-3 ${activeChat === chat.id ? 'bg-slate-100' : ''}`}>
+                            <div className="w-12 h-12 rounded-full bg-brand-100 flex-shrink-0 flex items-center justify-center text-brand-600 font-bold">
+                                {getInitials(chat.name || 'U')}
                             </div>
-                        ))}
-                    </div>
-                )}
+                            <div className="flex-1 min-w-0">
+                                <h4 className="font-semibold text-slate-800 text-sm truncate">{chat.name || chat.id.split('@')[0]}</h4>
+                                <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
               </div>
 
-              {/* Chat Window */}
               <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
-                {/* Background Pattern Overlay (Optional) */}
-                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
-
                 {activeChat ? (
                   <>
-                     {/* Header */}
-                     <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
+                     <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/95 backdrop-blur-sm z-10">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
-                                {activeChatCompany ? (
-                                    <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold">
-                                        {activeChatCompany.razaoSocial.substring(0,2)}
-                                    </div>
-                                ) : (
-                                    <User size={20} />
-                                )}
-                            </div>
-                            <div className="flex flex-col">
-                                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                                    {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
-                                    {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
-                                </h3>
-                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
-                                {activeChatCompany ? (
-                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
-                                ) : (
-                                    <p className="text-[10px] text-slate-400">online</p>
-                                )}
-                            </div>
+                            <h3 className="font-bold text-slate-800 text-sm">
+                                {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '')}
+                            </h3>
                         </div>
-
-                        <div className="flex items-center gap-3">
-                            {/* AI Toggle */}
-                            {activeChatCompany && (
-                                <button 
-                                    onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
-                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-xs font-bold ${
-                                        activeChatCompany.aiActive 
-                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-sm' 
-                                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-                                    }`}
-                                >
-                                    {activeChatCompany.aiActive ? <Bot size={16} /> : <Power size={16} />}
-                                    {activeChatCompany.aiActive ? "IA Auto" : "IA Off"}
-                                </button>
-                            )}
-
-                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
-
-                            {/* Actions Menu */}
-                            <div className="flex items-center gap-1">
-                                <button 
-                                    title="Marcar como Interessado"
-                                    onClick={() => {
-                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-                                        if(comp) updateLeadStatus(comp.id, 'interested');
-                                    }} 
-                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
-                                >
-                                    <CheckCircle2 size={20} />
-                                </button>
-                                <button 
-                                    title="Descartar"
-                                    onClick={() => {
-                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
-                                    }} 
-                                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
-                                >
-                                    <Trash2 size={20} />
-                                </button>
-                                <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
-                                    <MoreVertical size={20} />
-                                </button>
-                            </div>
-                        </div>
+                        {activeChatCompany && (
+                            <button onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)} className={`px-3 py-1.5 rounded-lg border text-xs font-bold ${activeChatCompany.aiActive ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                                {activeChatCompany.aiActive ? "IA Auto" : "IA Off"}
+                            </button>
+                        )}
                      </div>
 
-                     {/* Messages Area */}
-                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
+                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                         {chatMessages.map(msg => (
-                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
-                              <div className={`relative max-w-[75%] px-3 py-2 text-sm shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] ${
-                                  msg.fromMe 
-                                  ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
-                                  : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
-                              }`}>
-                                 {/* Triangle tail */}
-                                 <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
-                                     msg.fromMe 
-                                     ? '-right-[6px] border-t-[#d9fdd3]' 
-                                     : '-left-[6px] border-t-white'
-                                 }`}></div>
-
-                                 {msg.hasMedia && (
-                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
-                                         <PaperclipIcon size={12}/> Mídia Oculta
-                                     </div>
-                                 )}
-                                 
-                                 <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
-                                 
-                                 <div className="absolute bottom-1 right-2 flex items-center gap-1">
-                                     <span className="text-[10px] text-slate-500/80">
-                                         {formatTime(msg.timestamp)}
-                                     </span>
-                                     {msg.fromMe && <Check size={12} className="text-emerald-500" />}
-                                 </div>
+                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`relative max-w-[75%] px-3 py-2 text-sm shadow-sm rounded-lg ${msg.fromMe ? 'bg-[#d9fdd3] text-slate-900' : 'bg-white text-slate-900'}`}>
+                                 <p className="whitespace-pre-wrap">{msg.body}</p>
+                                 <span className="text-[10px] text-slate-400 block text-right mt-1">{formatTime(msg.timestamp)}</span>
                               </div>
                            </div>
                         ))}
                      </div>
 
-                     {/* Input Area */}
-                     <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
-                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
-                            <Smile size={24} />
-                        </button>
-                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
-                            <PaperclipIcon size={22} />
-                        </button>
-                        
-                        <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
-                            <input 
-                                type="text" 
-                                className="flex-1 bg-transparent outline-none text-slate-800 placeholder-slate-400"
-                                value={newMessage} 
-                                onChange={e => setNewMessage(e.target.value)} 
-                                onKeyDown={e => e.key === 'Enter' && sendMessage()} 
-                                placeholder="Digite uma mensagem..." 
-                            />
-                        </div>
-
-                        {newMessage.trim() ? (
-                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
-                                <Send size={20} className="ml-0.5" />
-                            </button>
-                        ) : (
-                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
-                                <Mic size={24} />
-                            </button>
-                        )}
+                     <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2">
+                        <input type="text" className="flex-1 bg-white rounded-xl border border-white px-4 py-2 outline-none" value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Digite uma mensagem..." />
+                        <button onClick={sendMessage} className="p-3 bg-emerald-600 text-white rounded-full"><Send size={20} /></button>
                      </div>
                   </>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-[#f0f2f5] border-b-[6px] border-brand-500/20">
-                      <div className="w-64 h-64 opacity-10 bg-contain bg-no-repeat bg-center mb-4" style={{ backgroundImage: 'url("https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg")' }}></div>
-                      <h2 className="text-2xl font-light text-slate-600 mb-2">WhatsApp CRM</h2>
-                      <p className="text-sm text-slate-500 max-w-sm text-center">Selecione uma conversa para iniciar o atendimento ou visualizar o histórico.</p>
-                      <div className="mt-8 text-xs text-slate-400 flex items-center gap-1">
-                          <Bot size={12}/> IA Ativa e pronta para vender
-                      </div>
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+                      <h2 className="text-2xl font-light text-slate-600">Selecione uma conversa</h2>
                   </div>
                 )}
               </div>
@@ -1365,7 +846,7 @@ const App: React.FC = () => {
                  <div className="flex justify-between items-center">
                      <div>
                         <h2 className="text-2xl font-bold text-slate-800">Base de Conhecimento</h2>
-                        <p className="text-slate-500">Vincule motivos da SEFAZ a instruções para a IA</p>
+                        <p className="text-slate-500">Regras vinculadas aos motivos reais do banco de dados</p>
                      </div>
                      <button onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })} className="btn-primary">
                          <Plus size={18} /> Nova Regra
@@ -1373,16 +854,19 @@ const App: React.FC = () => {
                  </div>
 
                  {editingRule ? (
-                     <div className="card-premium p-8 animate-fade-in">
-                         <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
-                         <div className="space-y-4">
+                     <div className="card-premium p-8 animate-fade-in shadow-xl border-brand-100">
+                         <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-bold text-slate-800">Editor de Regra</h3>
+                            <span className="text-xs bg-brand-50 text-brand-600 px-3 py-1 rounded-full font-bold">Instrução Contextual</span>
+                         </div>
+                         <div className="space-y-6">
                              <div>
-                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
+                                 <label className="block text-sm font-bold text-slate-700 mb-2 uppercase tracking-wide">Motivo SEFAZ (Banco de Dados)</label>
                                  <div className="relative">
                                      <input 
                                         list="reasons-list"
-                                        className="input-premium" 
-                                        placeholder="Selecione ou digite um motivo..."
+                                        className="input-premium border-brand-200 focus:border-brand-500" 
+                                        placeholder="Selecione o motivo exato..."
                                         value={editingRule.motivoSituacao}
                                         onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
                                      />
@@ -1392,65 +876,74 @@ const App: React.FC = () => {
                                         ))}
                                      </datalist>
                                  </div>
-                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
+                                 <p className="text-xs text-slate-400 mt-2">Dica: Use a lista suspensa para garantir que a IA identifique o lead corretamente.</p>
                              </div>
                              
                              <div>
-                                 <label className="block text-sm font-medium text-slate-700 mb-2">Instruções para a IA</label>
-                                 {editingRule.instructions.map((inst, idx) => (
-                                     <div key={idx} className="flex gap-2 mb-2">
-                                         <input 
-                                            className="input-premium flex-1" 
-                                            value={inst.content} 
-                                            onChange={e => {
-                                                const newInsts = [...editingRule.instructions];
-                                                newInsts[idx].content = e.target.value;
-                                                setEditingRule({...editingRule, instructions: newInsts});
-                                            }}
-                                            placeholder="Instrução detalhada..."
-                                         />
-                                         <button onClick={() => {
-                                             const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
-                                             setEditingRule({...editingRule, instructions: newInsts});
-                                         }} className="p-3 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
-                                     </div>
-                                 ))}
+                                 <label className="block text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Diretrizes para a IA</label>
+                                 <div className="space-y-3">
+                                     {editingRule.instructions.map((inst, idx) => (
+                                         <div key={idx} className="flex gap-3 group">
+                                             <div className="flex-1">
+                                                 <input 
+                                                    className="input-premium focus:ring-brand-500/20" 
+                                                    value={inst.content} 
+                                                    onChange={e => {
+                                                        const newInsts = [...editingRule.instructions];
+                                                        newInsts[idx].content = e.target.value;
+                                                        setEditingRule({...editingRule, instructions: newInsts});
+                                                    }}
+                                                    placeholder="Ex: Explicar que o MEI excedeu o limite..."
+                                                 />
+                                             </div>
+                                             <button onClick={() => {
+                                                 const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                                 setEditingRule({...editingRule, instructions: newInsts});
+                                             }} className="p-3 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"><Trash2 size={20}/></button>
+                                         </div>
+                                     ))}
+                                 </div>
                                  <button onClick={() => {
                                      setEditingRule({
                                          ...editingRule, 
                                          instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]
                                      });
-                                 }} className="text-brand-600 text-sm font-semibold hover:underline">+ Adicionar Instrução</button>
+                                 }} className="mt-4 flex items-center gap-2 text-brand-600 text-sm font-bold hover:text-brand-700 transition-colors">
+                                     <Plus size={16} /> Adicionar Nova Diretriz
+                                 </button>
                              </div>
 
-                             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                             <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
                                  <button onClick={() => setEditingRule(null)} className="btn-secondary">Cancelar</button>
                                  <button onClick={() => {
-                                     if(!editingRule.motivoSituacao) return alert("Preencha o motivo");
+                                     if(!editingRule.motivoSituacao) return alert("Selecione um motivo");
                                      const newRules = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id);
                                      newRules.push(editingRule);
                                      saveAiConfig({...aiConfig, knowledgeRules: newRules});
                                      setEditingRule(null);
-                                 }} className="btn-primary">Salvar Regra</button>
+                                 }} className="btn-primary px-8">Salvar Regra de Inteligência</button>
                              </div>
                          </div>
                      </div>
                  ) : (
                      <div className="grid gap-4">
                          {aiConfig.knowledgeRules.map(rule => (
-                             <div key={rule.id} className="card-premium p-6 flex justify-between items-start">
+                             <div key={rule.id} className="card-premium p-6 flex justify-between items-start border-l-4 border-l-brand-500 hover:shadow-lg transition-shadow">
                                  <div>
-                                     <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                     <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2 mb-3">
                                          <BookOpen size={18} className="text-brand-500"/>
                                          {rule.motivoSituacao}
                                      </h4>
-                                     <ul className="mt-2 space-y-1">
+                                     <div className="space-y-2">
                                          {rule.instructions.map((inst, i) => (
-                                             <li key={i} className="text-sm text-slate-600 list-disc list-inside">{inst.content}</li>
+                                             <div key={i} className="flex gap-2 items-start text-sm text-slate-600">
+                                                 <CheckCircle2 size={14} className="mt-0.5 text-emerald-500 shrink-0" />
+                                                 <p>{inst.content}</p>
+                                             </div>
                                          ))}
-                                     </ul>
+                                     </div>
                                  </div>
-                                 <div className="flex gap-2">
+                                 <div className="flex gap-1">
                                      <button onClick={() => setEditingRule(rule)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit size={18}/></button>
                                      <button onClick={() => {
                                          if(confirm("Excluir regra?")) {
@@ -1461,11 +954,6 @@ const App: React.FC = () => {
                                  </div>
                              </div>
                          ))}
-                         {aiConfig.knowledgeRules.length === 0 && (
-                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
-                             </div>
-                         )}
                      </div>
                  )}
               </div>
@@ -1473,144 +961,23 @@ const App: React.FC = () => {
 
            {activeTab === 'settings' && (
                <div className="max-w-3xl mx-auto space-y-6">
-                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
-                   
                    <div className="card-premium p-8">
-                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
-                       
-                       <div className="space-y-6">
-                           <div className="grid grid-cols-2 gap-4 mb-4">
-                               <button 
-                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-2.5-flash'})}
-                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
-                                       aiConfig.provider === 'gemini' 
-                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
-                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                   }`}
-                               >
-                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
-                                   <span className="font-bold">Google Gemini</span>
-                               </button>
-
-                               <button 
-                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
-                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
-                                       aiConfig.provider === 'groq' 
-                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
-                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                   }`}
-                               >
-                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
-                                   <span className="font-bold">Groq (Llama 3)</span>
-                               </button>
-                           </div>
-
-                           {aiConfig.provider === 'gemini' && (
-                               <ApiKeyInput 
-                                   label="Google Gemini" 
-                                   provider="gemini"
-                                   activeProvider={aiConfig.provider}
-                                   currentKey={aiConfig.apiKeys?.gemini}
-                                   onChange={(prov: string, val: string) => setAiConfig({
-                                       ...aiConfig, 
-                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
-                                   })}
-                               />
-                           )}
-
-                           {aiConfig.provider === 'groq' && (
-                               <ApiKeyInput 
-                                   label="Groq Cloud" 
-                                   provider="groq"
-                                   activeProvider={aiConfig.provider}
-                                   currentKey={aiConfig.apiKeys?.groq}
-                                   onChange={(prov: string, val: string) => setAiConfig({
-                                       ...aiConfig, 
-                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
-                                   })}
-                               />
-                           )}
-                       </div>
-                   </div>
-
-                   <div className="card-premium p-8">
-                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Configurações de IA</h3>
                        <div className="space-y-4">
                            <div>
-                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
-                               <input 
-                                  className="input-premium"
-                                  value={aiConfig.model}
-                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
-                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-2.5-flash" : "llama-3.1-8b-instant"}
-                               />
-                           </div>
-
-                           <div>
-                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona Global (Base)</label>
                                <textarea 
                                   className="input-premium h-32"
                                   value={aiConfig.persona}
                                   onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
-                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
                                />
-                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
+                               <p className="text-xs text-slate-400 mt-2">Esta persona será usada como base antes das regras específicas da Base de Conhecimento.</p>
                            </div>
-                           
-                           <div>
-                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
-                               <input 
-                                  type="range" min="0" max="1" step="0.1" 
-                                  className="w-full"
-                                  value={aiConfig.temperature}
-                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
-                               />
-                               <div className="flex justify-between text-xs text-slate-400">
-                                   <span>Preciso (0.0)</span>
-                                   <span>Criativo (1.0)</span>
-                               </div>
-                           </div>
-
-                           <div>
-                               <label className="flex items-center gap-2 cursor-pointer">
-                                   <input 
-                                      type="checkbox" 
-                                      checked={aiConfig.aiActive}
-                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
-                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
-                                   />
-                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
-                               </label>
-                           </div>
+                           <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary w-full mt-4"><Save size={18}/> Salvar Preferências</button>
                        </div>
-                   </div>
-
-                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
-                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
-                       <div className="flex justify-between items-center">
-                           <div>
-                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
-                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
-                           </div>
-                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
-                               <Trash2 size={18}/> Limpar Dados
-                           </button>
-                       </div>
-                   </div>
-
-                   <div className="flex justify-end">
-                       <button 
-                           onClick={() => saveAiConfig(aiConfig)} 
-                           disabled={isSavingConfig}
-                           className="btn-primary flex items-center gap-2"
-                       >
-                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
-                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
-                       </button>
                    </div>
                </div>
            )}
-
         </div>
       </main>
     </div>
