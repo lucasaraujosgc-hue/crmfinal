@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
@@ -54,10 +55,8 @@ function useInterval(callback: () => void, delay: number | null) {
 
 // --- HELPERS ---
 
-// Limpa o motivo removendo o endereço de correspondência
 const cleanReasonText = (text: string | null | undefined) => {
     if (!text) return '';
-    // Corta nas palavras chaves comuns de endereço da SEFAZ
     return text.split('Endereço de Correspondência')[0]
                .split('Endereço:')[0]
                .split('Endereco de Correspondencia')[0]
@@ -166,15 +165,10 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
               )}
               <td className="px-6 py-4">
                 <div className="flex flex-col gap-1.5">
-                    {/* Razão Social em Destaque */}
                     <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
-                    
-                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
                     {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
                          <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
                     )}
-                    
-                    {/* Badges de IDs */}
                     <div className="flex flex-wrap gap-1.5 mt-1">
                         <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
                            CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
@@ -183,8 +177,6 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                            IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
                         </span>
                     </div>
-
-                    {/* Data da Situação movida para cá */}
                     {company.dataSituacaoCadastral && (
                         <div className="flex items-center gap-1 mt-1 text-rose-600">
                             <AlertCircle size={10} />
@@ -390,7 +382,7 @@ const App: React.FC = () => {
     reason: '',
     hasAccountant: 'all',
     status: 'all',
-    statusWa: 'all', // Added WhatsApp Status Filter
+    statusWa: 'all',
     hasPhone: 'all'
   });
   
@@ -520,13 +512,13 @@ const App: React.FC = () => {
                   model: newConfig.model,
                   aiActive: newConfig.aiActive,
                   provider: newConfig.provider,
-                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
+                  apiKeys: newConfig.apiKeys 
               })
           });
           
           if (res.ok) {
               const data = await res.json();
-              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
+              setAiConfig(data.config || newConfig);
               alert('Configurações salvas e aplicadas com sucesso!');
           } else {
               alert('Erro ao salvar no servidor.');
@@ -560,7 +552,6 @@ const App: React.FC = () => {
         setAvailableCities((data.municipios as string[]) || []);
         
         if (data.motivos) {
-             // Mantemos os motivos para carregar no datalist da Base de Conhecimento
              setAvailableReasons(data.motivos || []);
         } else {
              setAvailableReasons([]);
@@ -613,7 +604,6 @@ const App: React.FC = () => {
       if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
       try {
           await fetch(`/api/imports/${id}`, { method: 'DELETE' });
-          // Short delay to ensure scraping stopped and DB cleared
           setTimeout(() => {
               fetchImports();
               fetchCompanies();
@@ -676,7 +666,6 @@ const App: React.FC = () => {
           if (res.ok) {
               alert('Campanha criada e envios iniciados!');
               setIsCreatingCampaign(false);
-              // Reset again just in case
               setNewCampaign({
                   name: '',
                   description: '',
@@ -710,7 +699,6 @@ const App: React.FC = () => {
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({ id, active: newStatus })
           });
-          // Update local state to reflect change immediately
           setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
       } catch(e) { console.error(e); }
   };
@@ -725,20 +713,10 @@ const App: React.FC = () => {
         c.cnpj?.includes(filters.search);
         
       const cityMatch = !filters.city || c.municipio === filters.city;
-      
-      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
-      const reasonMatch = !filters.reason || 
-        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
-        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
-        
-      const accountantMatch = filters.hasAccountant === 'all' ? true :
-        filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
-        
-      const phoneMatch = filters.hasPhone === 'all' ? true :
-        filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
-        
-      const waMatch = filters.statusWa === 'all' ? true :
-        c.campaignStatus === filters.statusWa;
+      const reasonMatch = !filters.reason || cleanReasonText(c.motivoSituacao).toLowerCase().includes(filters.reason.toLowerCase());
+      const accountantMatch = filters.hasAccountant === 'all' ? true : filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+      const phoneMatch = filters.hasPhone === 'all' ? true : filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+      const waMatch = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
 
       return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch && waMatch;
     });
@@ -769,13 +747,12 @@ const App: React.FC = () => {
           setActiveTab('whatsapp');
           setActiveChat(chatId);
           fetchMessages(chatId);
-          setSelectedKanbanLead(null); // Close modal
+          setSelectedKanbanLead(null);
       } else {
           alert('Empresa sem telefone cadastrado.');
       }
   };
 
-  // Handler to reset and open campaign wizard
   const handleOpenNewCampaign = () => {
       setNewCampaign({
           name: '',
@@ -788,30 +765,15 @@ const App: React.FC = () => {
       setIsCreatingCampaign(true);
   };
 
-  // --- Render ---
-
-  // Helper to find company in active chat
   const activeChatCompany = useMemo(() => {
       if (!activeChat || companies.length === 0) return null;
-      
-      // 1. Try to clean the ID (only digits)
       const cleanChatId = activeChat.replace(/\D/g, '');
-      
-      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
-      // This solves the @lid issue where the ID is not the phone number
-      const currentChatObj = chats.find(c => c.id === activeChat);
-      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
-
       return companies.find(c => {
           if (!c.telefone) return false;
           const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
-          
-          // Match against ID digits OR Name digits
-          return cleanChatId.includes(cleanCompanyPhone) || 
-                 cleanCompanyPhone.includes(cleanChatId) ||
-                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
+          return cleanChatId.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(cleanChatId);
       });
-  }, [activeChat, companies, chats]);
+  }, [activeChat, companies]);
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -865,7 +827,6 @@ const App: React.FC = () => {
           ))}
         </nav>
 
-        {/* Global AI Toggle in Sidebar */}
         {isSidebarOpen && (
             <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
                 <div className="flex items-center justify-between">
@@ -1144,7 +1105,6 @@ const App: React.FC = () => {
 
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6">
-              {/* Sidebar List */}
               <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
                 <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                    <div className="flex items-center gap-2">
@@ -1198,10 +1158,8 @@ const App: React.FC = () => {
                 )}
               </div>
 
-              {/* Chat Window */}
               <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
                 <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
-
                 {activeChat ? (
                   <>
                      <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
@@ -1345,12 +1303,12 @@ const App: React.FC = () => {
                          <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
                          <div className="space-y-4">
                              <div>
-                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Conforme consta no banco)</label>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Extraído do Banco)</label>
                                  <div className="relative">
                                      <input 
                                         list="reasons-list"
                                         className="input-premium" 
-                                        placeholder="Selecione ou digite um motivo do banco..."
+                                        placeholder="Selecione ou digite um motivo..."
                                         value={editingRule.motivoSituacao}
                                         onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
                                      />
@@ -1374,7 +1332,7 @@ const App: React.FC = () => {
                                                 newInsts[idx].content = e.target.value;
                                                 setEditingRule({...editingRule, instructions: newInsts});
                                             }}
-                                            placeholder="Ex: Explique que o MEI ultrapassou limite..."
+                                            placeholder="Instrução detalhada..."
                                          />
                                          <button onClick={() => {
                                              const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
@@ -1435,20 +1393,144 @@ const App: React.FC = () => {
 
            {activeTab === 'settings' && (
                <div className="max-w-3xl mx-auto space-y-6">
+                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
+                   
                    <div className="card-premium p-8">
-                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Configurações de IA</h3>
-                       <div className="space-y-4">
-                           <textarea 
-                              className="input-premium h-32"
-                              value={aiConfig.persona}
-                              onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
-                              placeholder="Persona global..."
-                           />
-                           <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary w-full">Salvar Configurações</button>
+                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
+                       
+                       <div className="space-y-6">
+                           <div className="grid grid-cols-2 gap-4 mb-4">
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-3-flash-preview'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'gemini' 
+                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
+                                   <span className="font-bold">Google Gemini</span>
+                               </button>
+
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'groq' 
+                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
+                                   <span className="font-bold">Groq (Llama 3)</span>
+                               </button>
+                           </div>
+
+                           {aiConfig.provider === 'gemini' && (
+                               <ApiKeyInput 
+                                   label="Google Gemini" 
+                                   provider="gemini"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.gemini}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+
+                           {aiConfig.provider === 'groq' && (
+                               <ApiKeyInput 
+                                   label="Groq Cloud" 
+                                   provider="groq"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.groq}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
                        </div>
+                   </div>
+
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <div className="space-y-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
+                               <input 
+                                  className="input-premium"
+                                  value={aiConfig.model}
+                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
+                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-3-flash-preview" : "llama-3.1-8b-instant"}
+                               />
+                           </div>
+
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
+                               <textarea 
+                                  className="input-premium h-32"
+                                  value={aiConfig.persona}
+                                  onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
+                               />
+                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
+                           </div>
+                           
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
+                               <input 
+                                  type="range" min="0" max="1" step="0.1" 
+                                  className="w-full"
+                                  value={aiConfig.temperature}
+                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
+                               />
+                               <div className="flex justify-between text-xs text-slate-400">
+                                   <span>Preciso (0.0)</span>
+                                   <span>Criativo (1.0)</span>
+                               </div>
+                           </div>
+
+                           <div>
+                               <label className="flex items-center gap-2 cursor-pointer">
+                                   <input 
+                                      type="checkbox" 
+                                      checked={aiConfig.aiActive}
+                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
+                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
+                                   />
+                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
+                               </label>
+                           </div>
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
+                       <div className="flex justify-between items-center">
+                           <div>
+                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
+                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
+                           </div>
+                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
+                               <Trash2 size={18}/> Limpar Dados
+                           </button>
+                       </div>
+                   </div>
+
+                   <div className="flex justify-end">
+                       <button 
+                           onClick={() => saveAiConfig(aiConfig)} 
+                           disabled={isSavingConfig}
+                           className="btn-primary flex items-center gap-2"
+                       >
+                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
+                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
+                       </button>
                    </div>
                </div>
            )}
+
         </div>
       </main>
     </div>
