@@ -25,7 +25,7 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
       console.warn(error);
       return initialValue;
     }
-  });i
+  });
 
   const setValue = (value: T | ((val: T) => T)) => {
     try {
@@ -415,7 +415,7 @@ const App: React.FC = () => {
 
   // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     provider: 'gemini',
     apiKeys: { gemini: '', groq: '' },
     persona: DEFAULT_AI_PERSONA,
@@ -560,8 +560,8 @@ const App: React.FC = () => {
         setAvailableCities((data.municipios as string[]) || []);
         
         if (data.motivos) {
-             const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
-             setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
+             // Mantemos os motivos para carregar no datalist da Base de Conhecimento
+             setAvailableReasons(data.motivos || []);
         } else {
              setAvailableReasons([]);
         }
@@ -901,7 +901,6 @@ const App: React.FC = () => {
 
         <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
           
-          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -1143,7 +1142,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* --- WHATSAPP TAB --- */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6">
               {/* Sidebar List */}
@@ -1202,12 +1200,10 @@ const App: React.FC = () => {
 
               {/* Chat Window */}
               <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
-                {/* Background Pattern Overlay (Optional) */}
                 <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
 
                 {activeChat ? (
                   <>
-                     {/* Header */}
                      <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
@@ -1224,7 +1220,6 @@ const App: React.FC = () => {
                                     {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
                                     {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
                                 </h3>
-                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
                                 {activeChatCompany ? (
                                     <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
                                 ) : (
@@ -1234,7 +1229,6 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-3">
-                            {/* AI Toggle */}
                             {activeChatCompany && (
                                 <button 
                                     onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
@@ -1251,13 +1245,11 @@ const App: React.FC = () => {
 
                             <div className="h-6 w-px bg-slate-200 mx-1"></div>
 
-                            {/* Actions Menu */}
                             <div className="flex items-center gap-1">
                                 <button 
                                     title="Marcar como Interessado"
                                     onClick={() => {
-                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-                                        if(comp) updateLeadStatus(comp.id, 'interested');
+                                        if(activeChatCompany) updateLeadStatus(activeChatCompany.id, 'interested');
                                     }} 
                                     className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
                                 >
@@ -1266,8 +1258,7 @@ const App: React.FC = () => {
                                 <button 
                                     title="Descartar"
                                     onClick={() => {
-                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
+                                        if(activeChatCompany) updateLeadStatus(activeChatCompany.id, 'not_interested');
                                     }} 
                                     className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
                                 >
@@ -1280,7 +1271,6 @@ const App: React.FC = () => {
                         </div>
                      </div>
 
-                     {/* Messages Area */}
                      <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
                         {chatMessages.map(msg => (
                            <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
@@ -1289,21 +1279,12 @@ const App: React.FC = () => {
                                   ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
                                   : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
                               }`}>
-                                 {/* Triangle tail */}
                                  <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
                                      msg.fromMe 
                                      ? '-right-[6px] border-t-[#d9fdd3]' 
                                      : '-left-[6px] border-t-white'
                                  }`}></div>
-
-                                 {msg.hasMedia && (
-                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
-                                         <PaperclipIcon size={12}/> Mídia Oculta
-                                     </div>
-                                 )}
-                                 
                                  <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
-                                 
                                  <div className="absolute bottom-1 right-2 flex items-center gap-1">
                                      <span className="text-[10px] text-slate-500/80">
                                          {formatTime(msg.timestamp)}
@@ -1315,15 +1296,9 @@ const App: React.FC = () => {
                         ))}
                      </div>
 
-                     {/* Input Area */}
                      <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
-                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
-                            <Smile size={24} />
-                        </button>
-                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
-                            <PaperclipIcon size={22} />
-                        </button>
-                        
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors"><Smile size={24} /></button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors"><PaperclipIcon size={22} /></button>
                         <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
                             <input 
                                 type="text" 
@@ -1334,16 +1309,9 @@ const App: React.FC = () => {
                                 placeholder="Digite uma mensagem..." 
                             />
                         </div>
-
-                        {newMessage.trim() ? (
-                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
-                                <Send size={20} className="ml-0.5" />
-                            </button>
-                        ) : (
-                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
-                                <Mic size={24} />
-                            </button>
-                        )}
+                        <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
+                            <Send size={20} className="ml-0.5" />
+                        </button>
                      </div>
                   </>
                 ) : (
@@ -1377,12 +1345,12 @@ const App: React.FC = () => {
                          <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
                          <div className="space-y-4">
                              <div>
-                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Conforme consta no banco)</label>
                                  <div className="relative">
                                      <input 
                                         list="reasons-list"
                                         className="input-premium" 
-                                        placeholder="Selecione ou digite um motivo..."
+                                        placeholder="Selecione ou digite um motivo do banco..."
                                         value={editingRule.motivoSituacao}
                                         onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
                                      />
@@ -1392,7 +1360,6 @@ const App: React.FC = () => {
                                         ))}
                                      </datalist>
                                  </div>
-                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
                              </div>
                              
                              <div>
@@ -1407,7 +1374,7 @@ const App: React.FC = () => {
                                                 newInsts[idx].content = e.target.value;
                                                 setEditingRule({...editingRule, instructions: newInsts});
                                             }}
-                                            placeholder="Instrução detalhada..."
+                                            placeholder="Ex: Explique que o MEI ultrapassou limite..."
                                          />
                                          <button onClick={() => {
                                              const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
@@ -1461,11 +1428,6 @@ const App: React.FC = () => {
                                  </div>
                              </div>
                          ))}
-                         {aiConfig.knowledgeRules.length === 0 && (
-                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
-                             </div>
-                         )}
                      </div>
                  )}
               </div>
@@ -1473,144 +1435,20 @@ const App: React.FC = () => {
 
            {activeTab === 'settings' && (
                <div className="max-w-3xl mx-auto space-y-6">
-                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
-                   
                    <div className="card-premium p-8">
-                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
-                       
-                       <div className="space-y-6">
-                           <div className="grid grid-cols-2 gap-4 mb-4">
-                               <button 
-                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-2.5-flash'})}
-                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
-                                       aiConfig.provider === 'gemini' 
-                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
-                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                   }`}
-                               >
-                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
-                                   <span className="font-bold">Google Gemini</span>
-                               </button>
-
-                               <button 
-                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
-                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
-                                       aiConfig.provider === 'groq' 
-                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
-                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                   }`}
-                               >
-                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
-                                   <span className="font-bold">Groq (Llama 3)</span>
-                               </button>
-                           </div>
-
-                           {aiConfig.provider === 'gemini' && (
-                               <ApiKeyInput 
-                                   label="Google Gemini" 
-                                   provider="gemini"
-                                   activeProvider={aiConfig.provider}
-                                   currentKey={aiConfig.apiKeys?.gemini}
-                                   onChange={(prov: string, val: string) => setAiConfig({
-                                       ...aiConfig, 
-                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
-                                   })}
-                               />
-                           )}
-
-                           {aiConfig.provider === 'groq' && (
-                               <ApiKeyInput 
-                                   label="Groq Cloud" 
-                                   provider="groq"
-                                   activeProvider={aiConfig.provider}
-                                   currentKey={aiConfig.apiKeys?.groq}
-                                   onChange={(prov: string, val: string) => setAiConfig({
-                                       ...aiConfig, 
-                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
-                                   })}
-                               />
-                           )}
-                       </div>
-                   </div>
-
-                   <div className="card-premium p-8">
-                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Configurações de IA</h3>
                        <div className="space-y-4">
-                           <div>
-                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
-                               <input 
-                                  className="input-premium"
-                                  value={aiConfig.model}
-                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
-                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-2.5-flash" : "llama-3.1-8b-instant"}
-                               />
-                           </div>
-
-                           <div>
-                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
-                               <textarea 
-                                  className="input-premium h-32"
-                                  value={aiConfig.persona}
-                                  onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
-                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
-                               />
-                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
-                           </div>
-                           
-                           <div>
-                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
-                               <input 
-                                  type="range" min="0" max="1" step="0.1" 
-                                  className="w-full"
-                                  value={aiConfig.temperature}
-                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
-                               />
-                               <div className="flex justify-between text-xs text-slate-400">
-                                   <span>Preciso (0.0)</span>
-                                   <span>Criativo (1.0)</span>
-                               </div>
-                           </div>
-
-                           <div>
-                               <label className="flex items-center gap-2 cursor-pointer">
-                                   <input 
-                                      type="checkbox" 
-                                      checked={aiConfig.aiActive}
-                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
-                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
-                                   />
-                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
-                               </label>
-                           </div>
+                           <textarea 
+                              className="input-premium h-32"
+                              value={aiConfig.persona}
+                              onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                              placeholder="Persona global..."
+                           />
+                           <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary w-full">Salvar Configurações</button>
                        </div>
-                   </div>
-
-                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
-                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
-                       <div className="flex justify-between items-center">
-                           <div>
-                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
-                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
-                           </div>
-                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
-                               <Trash2 size={18}/> Limpar Dados
-                           </button>
-                       </div>
-                   </div>
-
-                   <div className="flex justify-end">
-                       <button 
-                           onClick={() => saveAiConfig(aiConfig)} 
-                           disabled={isSavingConfig}
-                           className="btn-primary flex items-center gap-2"
-                       >
-                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
-                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
-                       </button>
                    </div>
                </div>
            )}
-
         </div>
       </main>
     </div>
