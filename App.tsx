@@ -54,8 +54,10 @@ function useInterval(callback: () => void, delay: number | null) {
 
 // --- HELPERS ---
 
+// Limpa o motivo removendo o endereço de correspondência
 const cleanReasonText = (text: string | null | undefined) => {
     if (!text) return '';
+    // Corta nas palavras chaves comuns de endereço da SEFAZ
     return text.split('Endereço de Correspondência')[0]
                .split('Endereço:')[0]
                .split('Endereco de Correspondencia')[0]
@@ -77,7 +79,7 @@ const getInitials = (name: string) => {
         .toUpperCase();
 };
 
-// --- COMPONENTS ---
+// --- EXTRACTED COMPONENTS ---
 
 const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
   <div className="card-premium p-4 flex flex-col gap-4 mb-6">
@@ -109,7 +111,7 @@ const FilterBar = React.memo(({ filters, setFilters, availableCities, availableR
       <select className="input-premium py-2 text-sm" value={filters.statusWa} onChange={e => setFilters((prev: any) => ({...prev, statusWa: e.target.value}))}>
         <option value="all">Status WhatsApp: Todos</option>
         <option value="pending">Pendente</option>
-        <option value="queued">Fila</option>
+        <option value="queued">Fila de Envio</option>
         <option value="sent">Enviado</option>
         <option value="replied">Respondeu</option>
         <option value="interested">Interessado</option>
@@ -164,10 +166,15 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
               )}
               <td className="px-6 py-4">
                 <div className="flex flex-col gap-1.5">
+                    {/* Razão Social em Destaque */}
                     <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
+                    
+                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
                     {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
                          <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
                     )}
+                    
+                    {/* Badges de IDs */}
                     <div className="flex flex-wrap gap-1.5 mt-1">
                         <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
                            CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
@@ -176,6 +183,8 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                            IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
                         </span>
                     </div>
+
+                    {/* Data da Situação movida para cá */}
                     {company.dataSituacaoCadastral && (
                         <div className="flex items-center gap-1 mt-1 text-rose-600">
                             <AlertCircle size={10} />
@@ -204,6 +213,7 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                         ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100' 
                         : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-100'
                     }`}
+                    title={company.aiActive ? "Desativar IA" : "Ativar IA"}
                   >
                       {company.aiActive ? <Bot size={18} /> : <Power size={18} />}
                   </button>
@@ -230,9 +240,19 @@ const StatusBadge = ({ status }: { status: string }) => {
         'error': 'bg-red-100 text-red-700',
         'skipped': 'bg-gray-100 text-gray-500'
     };
+    const labels: Record<string, string> = {
+        'pending': 'Pendente',
+        'queued': 'Fila',
+        'sent': 'Enviado',
+        'replied': 'Respondeu',
+        'interested': 'Interessado',
+        'not_interested': 'Descartado',
+        'error': 'Erro',
+        'skipped': 'Sem Zap'
+    };
     return (
         <span className={`px-2 py-1 rounded-full text-xs font-bold ${map[status] || map['pending']}`}>
-            {status}
+            {labels[status] || status}
         </span>
     )
 }
@@ -295,16 +315,26 @@ const SelectedLeadModal = ({ company, onClose, onGoToChat }: any) => {
                         <p className="text-lg font-semibold text-slate-900">{company.razaoSocial}</p>
                         <p className="text-sm text-slate-500">{company.cnpj} | IE: {company.inscricaoEstadual}</p>
                     </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Município</label>
+                            <p className="text-sm font-medium">{company.municipio}</p>
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Situação</label>
+                            <p className="text-sm font-medium">{company.situacaoCadastral}</p>
+                        </div>
+                    </div>
                     <div>
                         <label className="text-xs text-slate-500 uppercase font-bold">Motivo da Inaptidão</label>
                         <div className="bg-rose-50 text-rose-800 p-3 rounded-lg text-sm border border-rose-100">
-                            {company.motivoSituacao || 'Não informado'}
+                            {cleanReasonText(company.motivoSituacao) || 'Não informado'}
                         </div>
                     </div>
                     <div className="flex justify-end gap-3 pt-4">
                          <button onClick={onClose} className="btn-secondary">Fechar</button>
                          <button onClick={() => onGoToChat(company)} className="btn-primary" disabled={!company.telefone}>
-                             <MessageCircle size={18} /> WhatsApp
+                             <MessageCircle size={18} /> Ir para WhatsApp
                          </button>
                     </div>
                 </div>
@@ -317,8 +347,9 @@ const ApiKeyInput = ({ label, provider, currentKey, onChange, activeProvider }: 
     const [show, setShow] = useState(false);
     return (
         <div className={`p-4 rounded-xl border transition-all ${activeProvider === provider ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-200'}`}>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-                {label} {activeProvider === provider && " (ATIVO)"}
+            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center justify-between">
+                <span>{label}</span>
+                {activeProvider === provider && <span className="text-xs font-bold text-brand-600 px-2 py-0.5 bg-white rounded-full border border-brand-100">ATIVO</span>}
             </label>
             <div className="relative">
                 <input 
@@ -326,8 +357,9 @@ const ApiKeyInput = ({ label, provider, currentKey, onChange, activeProvider }: 
                     className="input-premium pr-10"
                     value={currentKey || ''}
                     onChange={(e) => onChange(provider, e.target.value)}
+                    placeholder={`Cole sua API Key do ${label}...`}
                 />
-                <button onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <button onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                     {show ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
             </div>
@@ -335,51 +367,88 @@ const ApiKeyInput = ({ label, provider, currentKey, onChange, activeProvider }: 
     );
 };
 
-// --- APP COMPONENT ---
+// --- MAIN APP COMPONENT ---
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
+  // Data States
   const [companies, setCompanies] = useState<CompanyResult[]>([]);
   const [imports, setImports] = useState<ImportBatch[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
+
+  // Import Process State
   const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
   const [processProgress, setProcessProgress] = useState({ total: 0, processed: 0, status: '' });
-  
+
+  // Filters State
   const [filters, setFilters] = useState({
-    search: '', city: '', reason: '', hasAccountant: 'all', status: 'all', statusWa: 'all', hasPhone: 'all'
+    search: '',
+    city: '',
+    reason: '',
+    hasAccountant: 'all',
+    status: 'all',
+    statusWa: 'all', // Added WhatsApp Status Filter
+    hasPhone: 'all'
   });
   
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [availableReasons, setAvailableReasons] = useState<string[]>([]);
+
+  // Selection & Bulk Actions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  // Kanban Selection
   const [selectedKanbanLead, setSelectedKanbanLead] = useState<CompanyResult | null>(null);
+
+  // Campaign Wizard State
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
   const [campaignStep, setCampaignStep] = useState(1);
   const [newCampaign, setNewCampaign] = useState({
-     name: '', description: '', initialMessage: 'Olá, tudo bem?', aiPersona: DEFAULT_AI_PERSONA
+     name: '',
+     description: '',
+     initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+     aiPersona: DEFAULT_AI_PERSONA
   });
 
+  // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
-    model: 'gemini-3-flash-preview', provider: 'gemini', apiKeys: { gemini: '', groq: '' },
-    persona: DEFAULT_AI_PERSONA, knowledgeRules: [], temperature: 0.7, aiActive: true
+    model: 'gemini-2.5-flash',
+    provider: 'gemini',
+    apiKeys: { gemini: '', groq: '' },
+    persona: DEFAULT_AI_PERSONA,
+    knowledgeRules: [],
+    temperature: 0.7,
+    aiActive: true
   });
   const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
+
+  // WhatsApp State
   const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
   const [chats, setChats] = useState<any[]>([]);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
+  // Initial Load
   useEffect(() => {
     fetchCompanies();
     fetchImports();
     fetchFilters();
     fetchCampaigns();
+    fetchAiConfig();
   }, []);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setIsCreatingCampaign(false);
+    setCampaignStep(1);
+    setSelectedKanbanLead(null);
+  }, [activeTab]);
 
   useInterval(() => {
     fetchWhatsAppStatus();
@@ -387,44 +456,56 @@ const App: React.FC = () => {
       fetchChats();
       if (activeChat) fetchMessages(activeChat);
     }
-  }, 4000);
+  }, 3000);
 
-  const fetchFilters = async () => {
-    try {
-      const res = await fetch('/api/unique-filters');
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableCities(data.municipios || []);
-        setAvailableReasons(data.motivos || []); // Motivos puros do banco
-      }
-    } catch (e) { console.error(e); }
-  };
+  // Progress Polling for Import
+  useInterval(() => {
+    if (currentProcessId) {
+      fetch(`/progress/${currentProcessId}`)
+        .then(res => {
+           const reader = res.body?.getReader();
+           return new ReadableStream({
+             start(controller) {
+               function push() {
+                 reader?.read().then(({ done, value }) => {
+                   if (done) { controller.close(); return; }
+                   const chunk = new TextDecoder("utf-8").decode(value);
+                   const lines = chunk.split('\n\n');
+                   lines.forEach(line => {
+                     if (line.startsWith('data: ')) {
+                       try {
+                         const data = JSON.parse(line.replace('data: ', ''));
+                         if (data.status === 'not_found') return;
+                         setProcessProgress(data);
+                         if (data.status === 'completed' || data.status === 'error') {
+                           fetchCompanies(); 
+                           fetchImports();
+                           fetchFilters(); 
+                           setTimeout(() => setCurrentProcessId(null), 3000);
+                         }
+                       } catch (e) {}
+                     }
+                   });
+                   push();
+                 });
+               }
+               push();
+             }
+           });
+        })
+        .catch(console.error);
+    }
+  }, currentProcessId ? 1000 : null);
 
-  const fetchCompanies = async () => {
-    try {
-      const res = await fetch('/get-all-results');
-      if (res.ok) {
-        const data = await res.json();
-        setCompanies(data);
-        const success = data.filter((c: any) => c.status === 'Sucesso').length;
-        setStats({ total: data.length, processed: data.length, success, errors: data.length - success });
-      }
-    } catch (error) { console.error(error); } 
-  };
-
-  const fetchImports = async () => {
-    try {
-      const res = await fetch('/get-imports');
-      if (res.ok) setImports(await res.json());
-    } catch (e) { console.error(e); }
-  };
-
-  const fetchCampaigns = async () => {
+  const fetchAiConfig = async () => {
       try {
-          const res = await fetch('/api/campaigns');
-          if (res.ok) setCampaigns(await res.json());
+          const res = await fetch('/api/config');
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data);
+          }
       } catch (e) { console.error(e); }
-  };
+  }
 
   const saveAiConfig = async (newConfig: AIConfig) => {
       setIsSavingConfig(true);
@@ -439,16 +520,106 @@ const App: React.FC = () => {
                   model: newConfig.model,
                   aiActive: newConfig.aiActive,
                   provider: newConfig.provider,
-                  apiKeys: newConfig.apiKeys
+                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
               })
           });
+          
           if (res.ok) {
               const data = await res.json();
-              setAiConfig(data.config || newConfig);
-              alert('Configurações aplicadas!');
+              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
+              alert('Configurações salvas e aplicadas com sucesso!');
+          } else {
+              alert('Erro ao salvar no servidor.');
           }
-      } catch (e) { console.error(e); } finally { setIsSavingConfig(false); }
+      } catch (e) { 
+          console.error(e); 
+          alert('Erro de conexão ao salvar configurações'); 
+      } finally {
+          setIsSavingConfig(false);
+      }
   }
+
+  const cleanupOrphanedData = async () => {
+      if(!confirm("Isso apagará empresas que não têm um arquivo de importação vinculado (Ex: uploads interrompidos). Continuar?")) return;
+      try {
+          const res = await fetch('/api/cleanup', { method: 'POST' });
+          if(res.ok) {
+              alert('Limpeza concluída!');
+              fetchCompanies();
+          }
+      } catch (e) { alert('Erro ao limpar'); }
+  }
+
+  // --- API Calls ---
+
+  const fetchFilters = async () => {
+    try {
+      const res = await fetch('/api/unique-filters');
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableCities((data.municipios as string[]) || []);
+        
+        if (data.motivos) {
+             const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
+             setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
+        } else {
+             setAvailableReasons([]);
+        }
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchCampaigns = async () => {
+      try {
+          const res = await fetch('/api/campaigns');
+          if (res.ok) setCampaigns(await res.json());
+      } catch (e) { console.error(e); }
+  };
+
+  const deleteCampaign = async (id: string) => {
+      if(!confirm("Tem certeza que deseja excluir esta campanha? Os leads voltarão para o status pendente.")) return;
+      try {
+          const res = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+          if(res.ok) {
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert("Erro ao excluir campanha");
+          }
+      } catch (e) { alert("Erro de conexão"); }
+  }
+
+  const fetchCompanies = async () => {
+    try {
+      const res = await fetch('/get-all-results');
+      if (res.ok) {
+        const data = await res.json();
+        setCompanies(data);
+        const success = data.filter((c: any) => c.status === 'Sucesso' || c.status === Status.SUCCESS).length;
+        const errors = data.filter((c: any) => c.status !== 'Sucesso' && c.status !== Status.SUCCESS).length;
+        setStats({ total: data.length, processed: data.length, success, errors });
+      }
+    } catch (error) { console.error(error); } 
+  };
+
+  const fetchImports = async () => {
+    try {
+      const res = await fetch('/get-imports');
+      if (res.ok) setImports(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const deleteImport = async (id: string) => {
+      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
+      try {
+          await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+          // Short delay to ensure scraping stopped and DB cleared
+          setTimeout(() => {
+              fetchImports();
+              fetchCompanies();
+          }, 1000);
+      } catch(e) { alert('Erro ao deletar'); }
+  };
 
   const fetchWhatsAppStatus = async () => {
     try {
@@ -477,31 +648,47 @@ const App: React.FC = () => {
   const sendMessage = async () => {
     if (!activeChat || !newMessage.trim()) return;
     try {
-      setChatMessages(prev => [...prev, { id: Date.now().toString(), fromMe: true, body: newMessage, timestamp: Date.now()/1000 }]);
-      await fetch('/api/whatsapp/send', {
+      setChatMessages(prev => [...prev, { id: 'temp-'+Date.now(), fromMe: true, body: newMessage, timestamp: Date.now()/1000 }]);
+      const res = await fetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chatId: activeChat, message: newMessage })
       });
-      setNewMessage('');
-      fetchMessages(activeChat);
+      if (res.ok) {
+        setNewMessage('');
+        fetchMessages(activeChat);
+      }
     } catch (e) { console.error(e); }
   };
 
   const createCampaign = async () => {
-      if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione leads.');
+      if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione empresas e dê um nome à campanha.');
+      
       try {
           const res = await fetch('/api/campaigns', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...newCampaign, leads: Array.from(selectedIds) })
+              body: JSON.stringify({
+                  ...newCampaign,
+                  leads: Array.from(selectedIds)
+              })
           });
           if (res.ok) {
+              alert('Campanha criada e envios iniciados!');
               setIsCreatingCampaign(false);
+              // Reset again just in case
+              setNewCampaign({
+                  name: '',
+                  description: '',
+                  initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+                  aiPersona: DEFAULT_AI_PERSONA
+              });
               fetchCampaigns();
               fetchCompanies();
+          } else {
+              alert('Erro ao criar campanha');
           }
-      } catch (e) { alert('Erro'); }
+      } catch (e) { alert('Erro de conexão'); }
   };
 
   const updateLeadStatus = async (id: string, status: string) => {
@@ -516,178 +703,914 @@ const App: React.FC = () => {
   };
 
   const toggleLeadAI = async (id: string, currentStatus: boolean | undefined) => {
+      const newStatus = !currentStatus;
       try {
           await fetch('/api/leads/toggle-ai', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ id, active: !currentStatus })
+              body: JSON.stringify({ id, active: newStatus })
           });
-          fetchCompanies();
+          // Update local state to reflect change immediately
+          setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
       } catch(e) { console.error(e); }
   };
 
+  // --- Filtering Logic ---
+
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {
-      const searchMatch = !filters.search || c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) || c.inscricaoEstadual?.includes(filters.search);
+      const searchMatch = !filters.search || 
+        c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) ||
+        c.inscricaoEstadual?.includes(filters.search) ||
+        c.cnpj?.includes(filters.search);
+        
       const cityMatch = !filters.city || c.municipio === filters.city;
-      const reasonMatch = !filters.reason || c.motivoSituacao === filters.reason;
-      const accountantMatch = filters.hasAccountant === 'all' ? true : filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
-      const waMatch = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
-      return searchMatch && cityMatch && reasonMatch && accountantMatch && waMatch;
+      
+      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
+      const reasonMatch = !filters.reason || 
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
+        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+        
+      const accountantMatch = filters.hasAccountant === 'all' ? true :
+        filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+        
+      const phoneMatch = filters.hasPhone === 'all' ? true :
+        filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+        
+      const waMatch = filters.statusWa === 'all' ? true :
+        c.campaignStatus === filters.statusWa;
+
+      return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch && waMatch;
     });
   }, [companies, filters]);
 
+  // --- Selection Logic ---
+
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredCompanies.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredCompanies.map(c => c.id)));
+    }
+  };
+
+  const goToChat = (company: CompanyResult) => {
+      if(company.telefone) {
+          const raw = company.telefone.replace(/\D/g, '');
+          const target = raw.length < 12 ? '55' + raw : raw;
+          const chatId = target + '@c.us';
+          setActiveTab('whatsapp');
+          setActiveChat(chatId);
+          fetchMessages(chatId);
+          setSelectedKanbanLead(null); // Close modal
+      } else {
+          alert('Empresa sem telefone cadastrado.');
+      }
+  };
+
+  // Handler to reset and open campaign wizard
+  const handleOpenNewCampaign = () => {
+      setNewCampaign({
+          name: '',
+          description: '',
+          initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+          aiPersona: DEFAULT_AI_PERSONA
+      });
+      setSelectedIds(new Set());
+      setCampaignStep(1);
+      setIsCreatingCampaign(true);
+  };
+
+  // --- Render ---
+
+  // Helper to find company in active chat
   const activeChatCompany = useMemo(() => {
-      if (!activeChat) return null;
+      if (!activeChat || companies.length === 0) return null;
+      
+      // 1. Try to clean the ID (only digits)
       const cleanChatId = activeChat.replace(/\D/g, '');
-      return companies.find(c => c.telefone?.replace(/\D/g, '').includes(cleanChatId) || cleanChatId.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-  }, [activeChat, companies]);
+      
+      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
+      // This solves the @lid issue where the ID is not the phone number
+      const currentChatObj = chats.find(c => c.id === activeChat);
+      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
+
+      return companies.find(c => {
+          if (!c.telefone) return false;
+          const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
+          
+          // Match against ID digits OR Name digits
+          return cleanChatId.includes(cleanCompanyPhone) || 
+                 cleanCompanyPhone.includes(cleanChatId) ||
+                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
+      });
+  }, [activeChat, companies, chats]);
 
   return (
-    <div className="flex h-screen bg-slate-100 font-sans">
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all flex flex-col z-20`}>
-        <div className="p-4 flex items-center justify-between border-b border-brand-800">
-          <span className="font-bold text-lg">CRM VÍRGULA</span>
-          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu size={18}/></button>
+    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
+      
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
+        <div className="p-4 flex items-center justify-between border-b border-brand-800/50">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shrink-0">
+              <span className="font-bold text-white text-lg">V</span>
+            </div>
+            {isSidebarOpen && <span className="font-bold text-lg tracking-tight whitespace-nowrap">CRM VÍRGULA</span>}
+          </div>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-brand-800 rounded-lg">
+            <Menu size={18} className="text-brand-200" />
+          </button>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
             { id: 'kanban', icon: Trello, label: 'Kanban Vendas' },
             { id: 'import', icon: Upload, label: 'Importar PDF' },
             { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' },
-            { id: 'campaigns', icon: Rocket, label: 'Campanhas' },
-            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp' },
-            { id: 'knowledge', icon: BookOpen, label: 'Conhecimento' },
+            { id: 'campaigns', icon: Rocket, label: 'Gestão de Campanhas' },
+            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', badge: waSession.status === 'connected' ? 'On' : 'Off' },
+            { id: 'knowledge', icon: BookOpen, label: 'Base de Conhecimento' },
             { id: 'settings', icon: Settings, label: 'Configurações' },
           ].map((item) => (
-            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl ${activeTab === item.id ? 'bg-brand-600' : 'hover:bg-brand-900'}`}>
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative ${
+                activeTab === item.id 
+                  ? 'bg-brand-600 text-white shadow-lg' 
+                  : 'text-brand-200 hover:bg-brand-900/50 hover:text-white'
+              }`}
+            >
               <item.icon size={20} />
-              {isSidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+              {isSidebarOpen && (
+                <>
+                  <span className="font-medium text-sm flex-1 text-left">{item.label}</span>
+                  {item.badge && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.badge === 'On' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </>
+              )}
             </button>
           ))}
         </nav>
+
+        {/* Global AI Toggle in Sidebar */}
+        {isSidebarOpen && (
+            <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Bot size={18} className={aiConfig.aiActive ? "text-emerald-400" : "text-slate-400"} />
+                        <span className="text-sm font-medium">IA Geral</span>
+                    </div>
+                    <button 
+                        onClick={() => saveAiConfig({...aiConfig, aiActive: !aiConfig.aiActive})}
+                        className={`w-10 h-5 rounded-full flex items-center transition-all p-1 ${aiConfig.aiActive ? 'bg-emerald-500 justify-end' : 'bg-slate-600 justify-start'}`}
+                    >
+                        <div className="w-3 h-3 bg-white rounded-full shadow-md"></div>
+                    </button>
+                </div>
+            </div>
+        )}
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
-        <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10">
-          <h1 className="text-xl font-bold">{activeTab.toUpperCase()}</h1>
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-50 relative">
+        <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-slate-800">
+            {activeTab === 'dashboard' && 'Visão Geral'}
+            {activeTab === 'kanban' && 'Gestão de Atendimentos'}
+            {activeTab === 'import' && 'Importação de Dados'}
+            {activeTab === 'companies' && 'Base de Empresas'}
+            {activeTab === 'campaigns' && 'Campanhas de Marketing'}
+            {activeTab === 'whatsapp' && 'Atendimento'}
+            {activeTab === 'knowledge' && 'Base de Conhecimento'}
+            {activeTab === 'settings' && 'Configurações'}
+          </h1>
         </header>
 
-        <div className="p-8">
+        <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
+          
+          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-4 gap-6">
-                <div className="card-premium p-6"><h3>Total Base</h3><p className="text-3xl font-bold">{stats.total}</p></div>
-                <div className="card-premium p-6"><h3>Sucesso Scraper</h3><p className="text-3xl font-bold text-emerald-600">{stats.success}</p></div>
-                <div className="card-premium p-6"><h3>Erros</h3><p className="text-3xl font-bold text-rose-600">{stats.errors}</p></div>
-                <div className="card-premium p-6"><h3>Campanhas</h3><p className="text-3xl font-bold text-brand-600">{campaigns.length}</p></div>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                {[
+                  { label: 'Total na Base', value: stats.total, color: 'text-brand-600', bg: 'bg-brand-50' },
+                  { label: 'Sucesso Scraper', value: stats.success, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { label: 'Erros Leitura', value: stats.errors, color: 'text-rose-600', bg: 'bg-rose-50' },
+                  { label: 'Campanhas Ativas', value: campaigns.length, color: 'text-amber-600', bg: 'bg-amber-50' },
+                ].map((stat, i) => (
+                  <div key={i} className="card-premium p-6 hover:-translate-y-1 transition-transform">
+                    <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
+                    <h3 className="text-3xl font-bold text-slate-700">{stat.value}</h3>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'import' && (
+            <div className="space-y-8">
+              {!currentProcessId && (
+                <div className="max-w-xl mx-auto card-premium p-10 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-all group cursor-pointer relative bg-white">
+                  <input 
+                    type="file" 
+                    accept=".pdf" 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const formData = new FormData();
+                      formData.append('file', file);
+                      try {
+                        const res = await fetch('/start-processing', { method: 'POST', body: formData });
+                        if (res.ok) {
+                          const { processId } = await res.json();
+                          setCurrentProcessId(processId);
+                        } else {
+                          alert('Erro ao enviar arquivo.');
+                        }
+                      } catch (err) { console.error(err); alert('Erro de conexão.'); }
+                    }}
+                  />
+                  <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
+                    <Upload size={40} />
+                  </div>
+                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Nova Importação SEFAZ</h3>
+                  <p className="text-slate-500 text-lg">Arraste o PDF ou clique para selecionar</p>
+                </div>
+              )}
+
+              {currentProcessId && (
+                <div className="max-w-2xl mx-auto card-premium p-8 text-center animate-fade-in">
+                  <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                    <RefreshCw size={32} className="animate-spin" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800 mb-2">Processando PDF...</h3>
+                  <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden mb-2">
+                    <div 
+                      className={`bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out`}
+                      style={{ width: `${processProgress.total > 0 ? (processProgress.processed / processProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-sm font-medium text-slate-600">
+                    {processProgress.processed} de {processProgress.total} empresas consultadas
+                  </p>
+                </div>
+              )}
+
+              <div className="card-premium p-6">
+                  <h3 className="text-lg font-bold mb-4 text-slate-800">Gerenciador de Arquivos</h3>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-600 font-medium">
+                              <tr>
+                                  <th className="px-4 py-3">Nome do Arquivo</th>
+                                  <th className="px-4 py-3">Data Importação</th>
+                                  <th className="px-4 py-3">Total Registros</th>
+                                  <th className="px-4 py-3">Status</th>
+                                  <th className="px-4 py-3 text-right">Ações</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                              {imports.map(imp => (
+                                  <tr key={imp.id} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 font-medium text-slate-800">{imp.filename}</td>
+                                      <td className="px-4 py-3 text-slate-500">{new Date(imp.date).toLocaleDateString()}</td>
+                                      <td className="px-4 py-3 text-slate-600">{imp.total}</td>
+                                      <td className="px-4 py-3">
+                                          <span className={`text-xs px-2 py-1 rounded-full ${imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                              {imp.status === 'completed' ? 'Sucesso' : imp.status}
+                                          </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                          <button onClick={() => deleteImport(imp.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg">
+                                              <Trash2 size={16}/>
+                                          </button>
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
             </div>
           )}
 
           {activeTab === 'companies' && (
-            <>
-              <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
-              <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={id => {
-                  const n = new Set(selectedIds); if(n.has(id)) n.delete(id); else n.add(id); setSelectedIds(n);
-              }} toggleSelectAll={() => setSelectedIds(selectedIds.size === filteredCompanies.length ? new Set() : new Set(filteredCompanies.map(c => c.id)))} selectable={true} onToggleAi={toggleLeadAI} />
-            </>
+            <div className="space-y-6">
+              <FilterBar 
+                filters={filters} 
+                setFilters={setFilters} 
+                availableCities={availableCities} 
+                availableReasons={availableReasons}
+                onRefresh={fetchCompanies}
+              />
+              <CompanyTable 
+                companies={filteredCompanies} 
+                selectedIds={selectedIds} 
+                toggleSelection={toggleSelection} 
+                toggleSelectAll={toggleSelectAll} 
+                selectable={true}
+                onToggleAi={toggleLeadAI}
+              />
+            </div>
           )}
 
           {activeTab === 'kanban' && (
-              <div className="flex gap-4 overflow-x-auto h-[70vh]">
-                  <KanbanColumn title="Pendente" companies={filteredCompanies.filter(c => c.campaignStatus === 'pending')} onCardClick={setSelectedKanbanLead}/>
-                  <KanbanColumn title="Enviado" companies={filteredCompanies.filter(c => c.campaignStatus === 'sent')} onCardClick={setSelectedKanbanLead}/>
-                  <KanbanColumn title="Respondeu" companies={filteredCompanies.filter(c => c.campaignStatus === 'replied')} onCardClick={setSelectedKanbanLead}/>
-                  <KanbanColumn title="Interessado" companies={filteredCompanies.filter(c => c.campaignStatus === 'interested')} onCardClick={setSelectedKanbanLead}/>
-                  <SelectedLeadModal company={selectedKanbanLead} onClose={() => setSelectedKanbanLead(null)} onGoToChat={c => { setActiveTab('whatsapp'); setActiveChat(c.telefone+'@c.us'); setSelectedKanbanLead(null); }}/>
-              </div>
-          )}
-
-          {activeTab === 'knowledge' && (
-              <div className="max-w-4xl mx-auto space-y-6">
-                  <div className="flex justify-between">
-                      <h2 className="text-2xl font-bold">Base de Conhecimento</h2>
-                      <button onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })} className="btn-primary">Nova Regra</button>
+              <div className="h-full">
+                  <div className="flex gap-4 overflow-x-auto pb-4 h-[calc(100vh-140px)]">
+                      <KanbanColumn 
+                        title="Envio Pendente" 
+                        status="pending" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'pending' || c.campaignStatus === 'queued' || !c.campaignStatus)} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Enviados" 
+                        status="sent" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'sent' || c.campaignStatus === 'delivered')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Responderam" 
+                        status="replied" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'replied')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Interessados" 
+                        status="interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'interested')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                       <KanbanColumn 
+                        title="Descartados" 
+                        status="not_interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'not_interested' || c.campaignStatus === 'skipped' || c.campaignStatus === 'error')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
                   </div>
-                  {editingRule ? (
-                      <div className="card-premium p-6">
-                          <div className="space-y-4">
-                              <label className="block text-sm font-bold">Motivo (Conforme consta no banco):</label>
-                              <select 
-                                className="input-premium"
-                                value={editingRule.motivoSituacao}
-                                onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
-                              >
-                                  <option value="">Selecione um motivo...</option>
-                                  {availableReasons.map((m, i) => <option key={i} value={m}>{m}</option>)}
-                              </select>
-                              <button onClick={() => setEditingRule({...editingRule, instructions: [...editingRule.instructions, { id: uuidv4(), content: '', type: 'simple', title: '' }]})} className="text-brand-600">+ Instrução</button>
-                              {editingRule.instructions.map((inst, i) => (
-                                  <input key={i} className="input-premium" value={inst.content} onChange={e => {
-                                      const n = [...editingRule.instructions]; n[i].content = e.target.value; setEditingRule({...editingRule, instructions: n});
-                                  }} />
-                              ))}
-                              <div className="flex justify-end gap-2">
-                                  <button onClick={() => setEditingRule(null)} className="btn-secondary">Cancelar</button>
-                                  <button onClick={() => {
-                                      const n = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id); n.push(editingRule);
-                                      saveAiConfig({...aiConfig, knowledgeRules: n}); setEditingRule(null);
-                                  }} className="btn-primary">Salvar</button>
-                              </div>
-                          </div>
-                      </div>
-                  ) : (
-                      aiConfig.knowledgeRules.map(r => (
-                          <div key={r.id} className="card-premium p-4 flex justify-between">
-                              <div><h4 className="font-bold">{r.motivoSituacao}</h4><p className="text-xs text-slate-500">{r.instructions.length} instruções</p></div>
-                              <button onClick={() => setEditingRule(r)} className="p-2 text-slate-400 hover:text-brand-600"><Edit size={18}/></button>
-                          </div>
-                      ))
-                  )}
+                  <SelectedLeadModal 
+                    company={selectedKanbanLead} 
+                    onClose={() => setSelectedKanbanLead(null)} 
+                    onGoToChat={goToChat}
+                  />
               </div>
           )}
 
+          {activeTab === 'campaigns' && (
+            <div className="space-y-6">
+               {!isCreatingCampaign ? (
+                   <div className="space-y-6">
+                       <div className="flex justify-between items-center">
+                           <h2 className="text-xl font-bold text-slate-700">Minhas Campanhas</h2>
+                           <button onClick={handleOpenNewCampaign} className="btn-primary flex items-center gap-2">
+                               <Plus size={18}/> Nova Campanha
+                           </button>
+                       </div>
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                           {campaigns.map(c => (
+                               <div key={c.id} className="card-premium p-6 group relative">
+                                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                       <button onClick={() => deleteCampaign(c.id)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg">
+                                           <Trash2 size={18}/>
+                                       </button>
+                                   </div>
+                                   <div className="flex justify-between items-start mb-4">
+                                       <div className="p-3 bg-brand-50 text-brand-600 rounded-xl">
+                                           <Rocket size={24}/>
+                                       </div>
+                                       <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full uppercase">Ativa</span>
+                                   </div>
+                                   <h3 className="font-bold text-lg text-slate-800 mb-2">{c.name}</h3>
+                                   <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-4">
+                                       <div><p className="text-xs text-slate-400">Total</p><p className="font-bold">{c.stats?.total || 0}</p></div>
+                                       <div><p className="text-xs text-slate-400">Enviados</p><p className="font-bold text-brand-600">{c.stats?.sent || 0}</p></div>
+                                       <div><p className="text-xs text-slate-400">Respostas</p><p className="font-bold text-emerald-600">{c.stats?.replied || 0}</p></div>
+                                   </div>
+                               </div>
+                           ))}
+                       </div>
+                   </div>
+               ) : (
+                   <div className="max-w-5xl mx-auto">
+                       <div className="mb-8 flex items-center justify-between">
+                           <div><h2 className="text-2xl font-bold text-slate-800">Criar Nova Campanha</h2></div>
+                           <button onClick={() => setIsCreatingCampaign(false)}><X size={24}/></button>
+                       </div>
+                       <div className="card-premium p-8">
+                           {campaignStep === 1 && (
+                               <div className="max-w-xl mx-auto space-y-6">
+                                   <input className="input-premium" placeholder="Nome da Campanha" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} />
+                                   <textarea className="input-premium h-32" placeholder="Descrição" value={newCampaign.description} onChange={e => setNewCampaign({...newCampaign, description: e.target.value})} />
+                                   <button onClick={() => setCampaignStep(2)} className="btn-primary w-full">Próximo</button>
+                               </div>
+                           )}
+                           {campaignStep === 2 && (
+                               <div className="space-y-4">
+                                   <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
+                                   <div className="h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
+                                      <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} toggleSelectAll={toggleSelectAll} selectable={true} onToggleAi={toggleLeadAI} />
+                                   </div>
+                                   <div className="flex justify-between pt-4">
+                                       <button onClick={() => setCampaignStep(1)} className="btn-secondary">Voltar</button>
+                                       <button onClick={() => setCampaignStep(3)} className="btn-primary" disabled={selectedIds.size === 0}>Próximo ({selectedIds.size})</button>
+                                   </div>
+                               </div>
+                           )}
+                           {campaignStep === 3 && (
+                               <div className="grid grid-cols-2 gap-8">
+                                   <textarea className="input-premium h-64" value={newCampaign.initialMessage} onChange={e => setNewCampaign({...newCampaign, initialMessage: e.target.value})} />
+                                   <textarea className="input-premium h-64" value={newCampaign.aiPersona} onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})} />
+                                   <button onClick={createCampaign} className="btn-primary col-span-2">Disparar</button>
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               )}
+            </div>
+          )}
+
+          {/* --- WHATSAPP TAB --- */}
           {activeTab === 'whatsapp' && (
-              <div className="flex h-[75vh] gap-4">
-                  <div className="w-1/3 card-premium overflow-y-auto">
-                      {chats.map(c => (
-                          <div key={c.id} onClick={() => { setActiveChat(c.id); fetchMessages(c.id); }} className={`p-4 border-b cursor-pointer ${activeChat === c.id ? 'bg-slate-100' : ''}`}>
-                              <h4 className="font-bold text-sm truncate">{c.name || c.id}</h4>
-                              <p className="text-xs text-slate-500 truncate">{c.lastMessage}</p>
-                          </div>
-                      ))}
-                  </div>
-                  <div className="flex-1 card-premium flex flex-col bg-[#efeae2]">
-                      <div className="p-3 border-b bg-white flex justify-between items-center">
-                          <span className="font-bold">{activeChatCompany?.razaoSocial || activeChat}</span>
-                          {activeChatCompany && <button onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)} className={`p-2 rounded-full ${activeChatCompany.aiActive ? 'text-emerald-500 bg-emerald-50' : 'text-slate-400'}`}><Bot/></button>}
-                      </div>
-                      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                          {chatMessages.map(m => (
-                              <div key={m.id} className={`flex ${m.fromMe ? 'justify-end' : 'justify-start'}`}>
-                                  <div className={`p-2 rounded-lg text-sm max-w-[80%] ${m.fromMe ? 'bg-[#d9fdd3]' : 'bg-white'}`}>{m.body}</div>
-                              </div>
-                          ))}
-                      </div>
-                      <div className="p-3 bg-white flex gap-2">
-                          <input className="flex-1 bg-slate-100 rounded-lg px-4 py-2" value={newMessage} onChange={e => setNewMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
-                          <button onClick={sendMessage} className="bg-emerald-600 text-white p-2 rounded-full"><Send/></button>
-                      </div>
-                  </div>
+            <div className="flex h-full gap-6">
+              {/* Sidebar List */}
+              <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                       <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                           <User size={20} />
+                       </div>
+                       <h3 className="font-bold text-slate-700">Conversas</h3>
+                   </div>
+                   <div className="flex gap-2">
+                        <div className={`w-3 h-3 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`} title={waSession.status}></div>
+                   </div>
+                </div>
+                
+                {waSession.status !== 'connected' && waSession.qrCode ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50/50">
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                            <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mix-blend-multiply" />
+                        </div>
+                        <p className="text-sm font-medium text-slate-600 animate-pulse flex items-center gap-2">
+                            <Phone size={16}/> Escaneie para conectar
+                        </p>
+                    </div>
+                ) : (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        {chats.map(chat => (
+                            <div 
+                                key={chat.id} 
+                                onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} 
+                                className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex gap-3 ${activeChat === chat.id ? 'bg-slate-100' : ''}`}
+                            >
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-100 to-brand-200 flex-shrink-0 flex items-center justify-center text-brand-600 font-bold text-sm">
+                                    {getInitials(chat.name || 'Unknown')}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-baseline mb-1">
+                                        <h4 className="font-semibold text-slate-800 text-sm truncate">{chat.name || chat.id.split('@')[0]}</h4>
+                                        <span className="text-[10px] text-slate-400 font-medium">{formatTime(chat.timestamp)}</span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
+                                </div>
+                                {chat.unreadCount > 0 && (
+                                    <div className="flex flex-col justify-center">
+                                        <span className="bg-emerald-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                                            {chat.unreadCount}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
               </div>
+
+              {/* Chat Window */}
+              <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
+                {/* Background Pattern Overlay (Optional) */}
+                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
+
+                {activeChat ? (
+                  <>
+                     {/* Header */}
+                     <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
+                                {activeChatCompany ? (
+                                    <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold">
+                                        {activeChatCompany.razaoSocial.substring(0,2)}
+                                    </div>
+                                ) : (
+                                    <User size={20} />
+                                )}
+                            </div>
+                            <div className="flex flex-col">
+                                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                    {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
+                                    {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
+                                </h3>
+                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
+                                {activeChatCompany ? (
+                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
+                                ) : (
+                                    <p className="text-[10px] text-slate-400">online</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {/* AI Toggle */}
+                            {activeChatCompany && (
+                                <button 
+                                    onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-xs font-bold ${
+                                        activeChatCompany.aiActive 
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-sm' 
+                                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {activeChatCompany.aiActive ? <Bot size={16} /> : <Power size={16} />}
+                                    {activeChatCompany.aiActive ? "IA Auto" : "IA Off"}
+                                </button>
+                            )}
+
+                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
+
+                            {/* Actions Menu */}
+                            <div className="flex items-center gap-1">
+                                <button 
+                                    title="Marcar como Interessado"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'interested');
+                                    }} 
+                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
+                                >
+                                    <CheckCircle2 size={20} />
+                                </button>
+                                <button 
+                                    title="Descartar"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
+                                    }} 
+                                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
+                                <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
+                                    <MoreVertical size={20} />
+                                </button>
+                            </div>
+                        </div>
+                     </div>
+
+                     {/* Messages Area */}
+                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
+                        {chatMessages.map(msg => (
+                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
+                              <div className={`relative max-w-[75%] px-3 py-2 text-sm shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] ${
+                                  msg.fromMe 
+                                  ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
+                                  : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
+                              }`}>
+                                 {/* Triangle tail */}
+                                 <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
+                                     msg.fromMe 
+                                     ? '-right-[6px] border-t-[#d9fdd3]' 
+                                     : '-left-[6px] border-t-white'
+                                 }`}></div>
+
+                                 {msg.hasMedia && (
+                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
+                                         <PaperclipIcon size={12}/> Mídia Oculta
+                                     </div>
+                                 )}
+                                 
+                                 <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
+                                 
+                                 <div className="absolute bottom-1 right-2 flex items-center gap-1">
+                                     <span className="text-[10px] text-slate-500/80">
+                                         {formatTime(msg.timestamp)}
+                                     </span>
+                                     {msg.fromMe && <Check size={12} className="text-emerald-500" />}
+                                 </div>
+                              </div>
+                           </div>
+                        ))}
+                     </div>
+
+                     {/* Input Area */}
+                     <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <Smile size={24} />
+                        </button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <PaperclipIcon size={22} />
+                        </button>
+                        
+                        <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
+                            <input 
+                                type="text" 
+                                className="flex-1 bg-transparent outline-none text-slate-800 placeholder-slate-400"
+                                value={newMessage} 
+                                onChange={e => setNewMessage(e.target.value)} 
+                                onKeyDown={e => e.key === 'Enter' && sendMessage()} 
+                                placeholder="Digite uma mensagem..." 
+                            />
+                        </div>
+
+                        {newMessage.trim() ? (
+                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
+                                <Send size={20} className="ml-0.5" />
+                            </button>
+                        ) : (
+                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                                <Mic size={24} />
+                            </button>
+                        )}
+                     </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-[#f0f2f5] border-b-[6px] border-brand-500/20">
+                      <div className="w-64 h-64 opacity-10 bg-contain bg-no-repeat bg-center mb-4" style={{ backgroundImage: 'url("https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg")' }}></div>
+                      <h2 className="text-2xl font-light text-slate-600 mb-2">WhatsApp CRM</h2>
+                      <p className="text-sm text-slate-500 max-w-sm text-center">Selecione uma conversa para iniciar o atendimento ou visualizar o histórico.</p>
+                      <div className="mt-8 text-xs text-slate-400 flex items-center gap-1">
+                          <Bot size={12}/> IA Ativa e pronta para vender
+                      </div>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
-          {activeTab === 'settings' && (
-              <div className="max-w-2xl mx-auto space-y-6">
-                  <div className="card-premium p-6 space-y-4">
-                      <h3 className="font-bold">IA e Modelos</h3>
-                      <ApiKeyInput label="Gemini Key" provider="gemini" currentKey={aiConfig.apiKeys?.gemini} activeProvider={aiConfig.provider} onChange={(p, v) => setAiConfig({...aiConfig, apiKeys: {...aiConfig.apiKeys, [p]: v}})} />
-                      <ApiKeyInput label="Groq Key" provider="groq" currentKey={aiConfig.apiKeys?.groq} activeProvider={aiConfig.provider} onChange={(p, v) => setAiConfig({...aiConfig, apiKeys: {...aiConfig.apiKeys, [p]: v}})} />
-                      <textarea className="input-premium h-32" value={aiConfig.persona} onChange={e => setAiConfig({...aiConfig, persona: e.target.value})} />
-                      <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary w-full">Salvar Configurações</button>
-                  </div>
+           {activeTab === 'knowledge' && (
+              <div className="max-w-4xl mx-auto space-y-6">
+                 <div className="flex justify-between items-center">
+                     <div>
+                        <h2 className="text-2xl font-bold text-slate-800">Base de Conhecimento</h2>
+                        <p className="text-slate-500">Vincule motivos da SEFAZ a instruções para a IA</p>
+                     </div>
+                     <button onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })} className="btn-primary">
+                         <Plus size={18} /> Nova Regra
+                     </button>
+                 </div>
+
+                 {editingRule ? (
+                     <div className="card-premium p-8 animate-fade-in">
+                         <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
+                         <div className="space-y-4">
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
+                                 <div className="relative">
+                                     <input 
+                                        list="reasons-list"
+                                        className="input-premium" 
+                                        placeholder="Selecione ou digite um motivo..."
+                                        value={editingRule.motivoSituacao}
+                                        onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
+                                     />
+                                     <datalist id="reasons-list">
+                                        {availableReasons.map((r: string, idx: number) => (
+                                            <option key={idx} value={r} />
+                                        ))}
+                                     </datalist>
+                                 </div>
+                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
+                             </div>
+                             
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-2">Instruções para a IA</label>
+                                 {editingRule.instructions.map((inst, idx) => (
+                                     <div key={idx} className="flex gap-2 mb-2">
+                                         <input 
+                                            className="input-premium flex-1" 
+                                            value={inst.content} 
+                                            onChange={e => {
+                                                const newInsts = [...editingRule.instructions];
+                                                newInsts[idx].content = e.target.value;
+                                                setEditingRule({...editingRule, instructions: newInsts});
+                                            }}
+                                            placeholder="Instrução detalhada..."
+                                         />
+                                         <button onClick={() => {
+                                             const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                             setEditingRule({...editingRule, instructions: newInsts});
+                                         }} className="p-3 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                     </div>
+                                 ))}
+                                 <button onClick={() => {
+                                     setEditingRule({
+                                         ...editingRule, 
+                                         instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]
+                                     });
+                                 }} className="text-brand-600 text-sm font-semibold hover:underline">+ Adicionar Instrução</button>
+                             </div>
+
+                             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                                 <button onClick={() => setEditingRule(null)} className="btn-secondary">Cancelar</button>
+                                 <button onClick={() => {
+                                     if(!editingRule.motivoSituacao) return alert("Preencha o motivo");
+                                     const newRules = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id);
+                                     newRules.push(editingRule);
+                                     saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                     setEditingRule(null);
+                                 }} className="btn-primary">Salvar Regra</button>
+                             </div>
+                         </div>
+                     </div>
+                 ) : (
+                     <div className="grid gap-4">
+                         {aiConfig.knowledgeRules.map(rule => (
+                             <div key={rule.id} className="card-premium p-6 flex justify-between items-start">
+                                 <div>
+                                     <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                         <BookOpen size={18} className="text-brand-500"/>
+                                         {rule.motivoSituacao}
+                                     </h4>
+                                     <ul className="mt-2 space-y-1">
+                                         {rule.instructions.map((inst, i) => (
+                                             <li key={i} className="text-sm text-slate-600 list-disc list-inside">{inst.content}</li>
+                                         ))}
+                                     </ul>
+                                 </div>
+                                 <div className="flex gap-2">
+                                     <button onClick={() => setEditingRule(rule)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit size={18}/></button>
+                                     <button onClick={() => {
+                                         if(confirm("Excluir regra?")) {
+                                             const newRules = aiConfig.knowledgeRules.filter(r => r.id !== rule.id);
+                                             saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                         }
+                                     }} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                 </div>
+                             </div>
+                         ))}
+                         {aiConfig.knowledgeRules.length === 0 && (
+                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
+                             </div>
+                         )}
+                     </div>
+                 )}
               </div>
-          )}
+           )}
+
+           {activeTab === 'settings' && (
+               <div className="max-w-3xl mx-auto space-y-6">
+                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
+                   
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
+                       
+                       <div className="space-y-6">
+                           <div className="grid grid-cols-2 gap-4 mb-4">
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-2.5-flash'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'gemini' 
+                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
+                                   <span className="font-bold">Google Gemini</span>
+                               </button>
+
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'groq' 
+                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
+                                   <span className="font-bold">Groq (Llama 3)</span>
+                               </button>
+                           </div>
+
+                           {aiConfig.provider === 'gemini' && (
+                               <ApiKeyInput 
+                                   label="Google Gemini" 
+                                   provider="gemini"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.gemini}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+
+                           {aiConfig.provider === 'groq' && (
+                               <ApiKeyInput 
+                                   label="Groq Cloud" 
+                                   provider="groq"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.groq}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <div className="space-y-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
+                               <input 
+                                  className="input-premium"
+                                  value={aiConfig.model}
+                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
+                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-2.5-flash" : "llama-3.1-8b-instant"}
+                               />
+                           </div>
+
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
+                               <textarea 
+                                  className="input-premium h-32"
+                                  value={aiConfig.persona}
+                                  onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
+                               />
+                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
+                           </div>
+                           
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
+                               <input 
+                                  type="range" min="0" max="1" step="0.1" 
+                                  className="w-full"
+                                  value={aiConfig.temperature}
+                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
+                               />
+                               <div className="flex justify-between text-xs text-slate-400">
+                                   <span>Preciso (0.0)</span>
+                                   <span>Criativo (1.0)</span>
+                               </div>
+                           </div>
+
+                           <div>
+                               <label className="flex items-center gap-2 cursor-pointer">
+                                   <input 
+                                      type="checkbox" 
+                                      checked={aiConfig.aiActive}
+                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
+                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
+                                   />
+                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
+                               </label>
+                           </div>
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
+                       <div className="flex justify-between items-center">
+                           <div>
+                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
+                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
+                           </div>
+                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
+                               <Trash2 size={18}/> Limpar Dados
+                           </button>
+                       </div>
+                   </div>
+
+                   <div className="flex justify-end">
+                       <button 
+                           onClick={() => saveAiConfig(aiConfig)} 
+                           disabled={isSavingConfig}
+                           className="btn-primary flex items-center gap-2"
+                       >
+                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
+                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
+                       </button>
+                   </div>
+               </div>
+           )}
+
         </div>
       </main>
     </div>
