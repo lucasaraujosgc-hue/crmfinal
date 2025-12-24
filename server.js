@@ -171,10 +171,10 @@ client.on('message', async (msg) => {
             const strictInstruction = `${persona}
 ${ruleInstructions}
 
---- REGRAS CRÍTICAS ---
-1. NÃO mencione termos técnicos internos como "base de conhecimento" ou "regras".
-2. Seja natural e direto. Responda o que foi perguntado usando os dados abaixo.
-3. Empresa: ${company.razao_social} | Status: ${company.situacao_cadastral} | Motivo: ${company.motivo_situacao_cadastral}
+--- REGRAS DE PERSONA ---
+1. NÃO cite "base de conhecimento" ou "instruções" na conversa.
+2. Seja natural, profissional e direto.
+3. Use as informações: Empresa: ${company.razao_social} | Motivo Inaptidão: ${company.motivo_situacao_cadastral}
 `;
 
             try {
@@ -198,7 +198,7 @@ ${ruleInstructions}
                     finalText = response.text;
                 }
                 
-                if (finalText && finalText.length > 2) {
+                if (finalText && finalText.length > 3) {
                     await msg.reply(finalText);
                     db.run(`UPDATE resultado SET campaign_status = 'replied', last_contacted = ? WHERE id = ?`, [new Date().toISOString(), company.id]);
                 }
@@ -209,11 +209,42 @@ ${ruleInstructions}
 
 client.initialize().catch(() => {});
 
-// --- Endpoints ---
+// Lógica de Envio de Campanhas
+function startCampaignSending(campaignId, message) {
+    const processQueue = () => {
+        db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND (campaign_status = 'queued' OR campaign_status = 'pending') LIMIT 1`, [campaignId], async (err, lead) => {
+            if (err || !lead) {
+                console.log(`[Campaign] Fila da campanha ${campaignId} finalizada ou vazia.`);
+                return;
+            }
+            if (!clientReady) return setTimeout(processQueue, 5000);
+
+            try {
+                const cleanPhone = lead.telefone.replace(/\D/g, '');
+                const target = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+                const actualTarget = target + "@c.us";
+                
+                const sentMsg = await client.sendMessage(actualTarget, message);
+                
+                db.run(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ?, wa_id = ? WHERE id = ?`, 
+                       [new Date().toISOString(), sentMsg.to, lead.id], () => {
+                    // Intervalo humano entre 8 e 15 segundos para evitar banimento
+                    setTimeout(processQueue, Math.floor(Math.random() * 7000) + 8000);
+                });
+            } catch (e) {
+                console.error(`[Campaign] Erro ao enviar para ${lead.telefone}:`, e.message);
+                db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 3000));
+            }
+        });
+    };
+    processQueue();
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// API Endpoints
 app.get('/api/config', (req, res) => res.json(aiConfig));
 app.post('/api/config/ai-rules', (req, res) => {
     const { rules, persona, temperature, model, aiActive, provider, apiKeys } = req.body;
@@ -245,6 +276,39 @@ app.get('/get-all-results', (req, res) => {
   });
 });
 
+app.get('/api/campaigns', (req, res) => {
+    db.all('SELECT * FROM campaign ORDER BY created_at DESC', (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+
+app.post('/api/campaigns', (req, res) => {
+    const { name, description, initialMessage, aiPersona, leads } = req.body;
+    if (!leads || leads.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado' });
+
+    const campaignId = uuidv4();
+    db.run(`INSERT INTO campaign (id, name, description, initial_message, ai_persona, status, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+            [campaignId, name, description, initialMessage, aiPersona, new Date().toISOString()], (err) => {
+                if (err) return res.status(500).json({ error: err.message });
+                
+                const placeholders = leads.map(() => '?').join(',');
+                db.run(`UPDATE resultado SET campaign_id = ?, campaign_status = 'queued' WHERE id IN (${placeholders})`, [campaignId, ...leads], (err2) => {
+                    if (err2) return res.status(500).json({ error: err2.message });
+                    startCampaignSending(campaignId, initialMessage); 
+                    res.json({ success: true, campaignId }); 
+                });
+            });
+});
+
+app.post('/api/leads/status', (req, res) => {
+    const { id, status } = req.body;
+    db.run(`UPDATE resultado SET campaign_status = ? WHERE id = ?`, [status, id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
 app.post('/api/leads/toggle-ai', (req, res) => {
     const { id, active } = req.body;
     db.run(`UPDATE resultado SET ai_active = ? WHERE id = ?`, [active ? 1 : 0, id], (err) => {
@@ -253,13 +317,49 @@ app.post('/api/leads/toggle-ai', (req, res) => {
     });
 });
 
+app.get('/api/whatsapp/chats', async (req, res) => {
+    if (!clientReady) return res.json([]);
+    try {
+        const chats = await client.getChats();
+        res.json(chats.slice(0, 50).map(c => ({
+            id: c.id._serialized,
+            name: c.name,
+            lastMessage: c.lastMessage?.body,
+            timestamp: c.timestamp,
+            unreadCount: c.unreadCount
+        })));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/whatsapp/messages/:chatId', async (req, res) => {
+    if (!clientReady) return res.json([]);
+    try {
+        const chat = await client.getChatById(req.params.chatId);
+        const messages = await chat.fetchMessages({ limit: 40 });
+        res.json(messages.map(m => ({
+            id: m.id.id,
+            fromMe: m.fromMe,
+            body: m.body,
+            timestamp: m.timestamp
+        })));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/whatsapp/send', async (req, res) => {
+    const { chatId, message } = req.body;
+    try {
+        await client.sendMessage(chatId, message);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/whatsapp/status', (req, res) => res.json({ status: clientReady ? 'connected' : 'disconnected', qr: qrCodeData }));
+
 app.post('/api/cleanup', (req, res) => {
     db.run(`DELETE FROM resultado WHERE consulta_id NOT IN (SELECT id FROM consulta)`, (err) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true });
     });
 });
-
-app.get('/api/whatsapp/status', (req, res) => res.json({ status: clientReady ? 'connected' : 'disconnected', qr: qrCodeData }));
 
 app.listen(port, () => console.log(`Server running at http://localhost:${port}`));

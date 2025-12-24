@@ -55,8 +55,10 @@ function useInterval(callback: () => void, delay: number | null) {
 
 // --- HELPERS ---
 
+// Limpa o motivo removendo o endereço de correspondência
 const cleanReasonText = (text: string | null | undefined) => {
     if (!text) return '';
+    // Corta nas palavras chaves comuns de endereço da SEFAZ
     return text.split('Endereço de Correspondência')[0]
                .split('Endereço:')[0]
                .split('Endereco de Correspondencia')[0]
@@ -165,10 +167,15 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
               )}
               <td className="px-6 py-4">
                 <div className="flex flex-col gap-1.5">
+                    {/* Razão Social em Destaque */}
                     <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
+                    
+                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
                     {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
                          <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
                     )}
+                    
+                    {/* Badges de IDs */}
                     <div className="flex flex-wrap gap-1.5 mt-1">
                         <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
                            CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
@@ -177,6 +184,8 @@ const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, togg
                            IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
                         </span>
                     </div>
+
+                    {/* Data da Situação movida para cá */}
                     {company.dataSituacaoCadastral && (
                         <div className="flex items-center gap-1 mt-1 text-rose-600">
                             <AlertCircle size={10} />
@@ -382,7 +391,7 @@ const App: React.FC = () => {
     reason: '',
     hasAccountant: 'all',
     status: 'all',
-    statusWa: 'all',
+    statusWa: 'all', // Added WhatsApp Status Filter
     hasPhone: 'all'
   });
   
@@ -512,13 +521,13 @@ const App: React.FC = () => {
                   model: newConfig.model,
                   aiActive: newConfig.aiActive,
                   provider: newConfig.provider,
-                  apiKeys: newConfig.apiKeys 
+                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
               })
           });
           
           if (res.ok) {
               const data = await res.json();
-              setAiConfig(data.config || newConfig);
+              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
               alert('Configurações salvas e aplicadas com sucesso!');
           } else {
               alert('Erro ao salvar no servidor.');
@@ -552,7 +561,8 @@ const App: React.FC = () => {
         setAvailableCities((data.municipios as string[]) || []);
         
         if (data.motivos) {
-             setAvailableReasons(data.motivos || []);
+             const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
+             setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
         } else {
              setAvailableReasons([]);
         }
@@ -604,6 +614,7 @@ const App: React.FC = () => {
       if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
       try {
           await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+          // Short delay to ensure scraping stopped and DB cleared
           setTimeout(() => {
               fetchImports();
               fetchCompanies();
@@ -666,6 +677,7 @@ const App: React.FC = () => {
           if (res.ok) {
               alert('Campanha criada e envios iniciados!');
               setIsCreatingCampaign(false);
+              // Reset again just in case
               setNewCampaign({
                   name: '',
                   description: '',
@@ -699,6 +711,7 @@ const App: React.FC = () => {
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({ id, active: newStatus })
           });
+          // Update local state to reflect change immediately
           setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
       } catch(e) { console.error(e); }
   };
@@ -713,10 +726,20 @@ const App: React.FC = () => {
         c.cnpj?.includes(filters.search);
         
       const cityMatch = !filters.city || c.municipio === filters.city;
-      const reasonMatch = !filters.reason || cleanReasonText(c.motivoSituacao).toLowerCase().includes(filters.reason.toLowerCase());
-      const accountantMatch = filters.hasAccountant === 'all' ? true : filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
-      const phoneMatch = filters.hasPhone === 'all' ? true : filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
-      const waMatch = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
+      
+      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
+      const reasonMatch = !filters.reason || 
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
+        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+        
+      const accountantMatch = filters.hasAccountant === 'all' ? true :
+        filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+        
+      const phoneMatch = filters.hasPhone === 'all' ? true :
+        filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+        
+      const waMatch = filters.statusWa === 'all' ? true :
+        c.campaignStatus === filters.statusWa;
 
       return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch && waMatch;
     });
@@ -747,12 +770,13 @@ const App: React.FC = () => {
           setActiveTab('whatsapp');
           setActiveChat(chatId);
           fetchMessages(chatId);
-          setSelectedKanbanLead(null);
+          setSelectedKanbanLead(null); // Close modal
       } else {
           alert('Empresa sem telefone cadastrado.');
       }
   };
 
+  // Handler to reset and open campaign wizard
   const handleOpenNewCampaign = () => {
       setNewCampaign({
           name: '',
@@ -765,15 +789,30 @@ const App: React.FC = () => {
       setIsCreatingCampaign(true);
   };
 
+  // --- Render ---
+
+  // Helper to find company in active chat
   const activeChatCompany = useMemo(() => {
       if (!activeChat || companies.length === 0) return null;
+      
+      // 1. Try to clean the ID (only digits)
       const cleanChatId = activeChat.replace(/\D/g, '');
+      
+      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
+      // This solves the @lid issue where the ID is not the phone number
+      const currentChatObj = chats.find(c => c.id === activeChat);
+      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
+
       return companies.find(c => {
           if (!c.telefone) return false;
           const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
-          return cleanChatId.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(cleanChatId);
+          
+          // Match against ID digits OR Name digits
+          return cleanChatId.includes(cleanCompanyPhone) || 
+                 cleanCompanyPhone.includes(cleanChatId) ||
+                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
       });
-  }, [activeChat, companies]);
+  }, [activeChat, companies, chats]);
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
@@ -827,6 +866,7 @@ const App: React.FC = () => {
           ))}
         </nav>
 
+        {/* Global AI Toggle in Sidebar */}
         {isSidebarOpen && (
             <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
                 <div className="flex items-center justify-between">
@@ -862,6 +902,7 @@ const App: React.FC = () => {
 
         <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
           
+          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -1103,8 +1144,10 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* --- WHATSAPP TAB --- */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6">
+              {/* Sidebar List */}
               <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
                 <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                    <div className="flex items-center gap-2">
@@ -1158,10 +1201,14 @@ const App: React.FC = () => {
                 )}
               </div>
 
+              {/* Chat Window */}
               <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
+                {/* Background Pattern Overlay (Optional) */}
                 <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
+
                 {activeChat ? (
                   <>
+                     {/* Header */}
                      <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
@@ -1178,6 +1225,7 @@ const App: React.FC = () => {
                                     {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
                                     {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
                                 </h3>
+                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
                                 {activeChatCompany ? (
                                     <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
                                 ) : (
@@ -1187,6 +1235,7 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-3">
+                            {/* AI Toggle */}
                             {activeChatCompany && (
                                 <button 
                                     onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
@@ -1203,11 +1252,13 @@ const App: React.FC = () => {
 
                             <div className="h-6 w-px bg-slate-200 mx-1"></div>
 
+                            {/* Actions Menu */}
                             <div className="flex items-center gap-1">
                                 <button 
                                     title="Marcar como Interessado"
                                     onClick={() => {
-                                        if(activeChatCompany) updateLeadStatus(activeChatCompany.id, 'interested');
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'interested');
                                     }} 
                                     className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
                                 >
@@ -1216,7 +1267,8 @@ const App: React.FC = () => {
                                 <button 
                                     title="Descartar"
                                     onClick={() => {
-                                        if(activeChatCompany) updateLeadStatus(activeChatCompany.id, 'not_interested');
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
                                     }} 
                                     className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
                                 >
@@ -1229,6 +1281,7 @@ const App: React.FC = () => {
                         </div>
                      </div>
 
+                     {/* Messages Area */}
                      <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
                         {chatMessages.map(msg => (
                            <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
@@ -1237,12 +1290,21 @@ const App: React.FC = () => {
                                   ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
                                   : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
                               }`}>
+                                 {/* Triangle tail */}
                                  <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
                                      msg.fromMe 
                                      ? '-right-[6px] border-t-[#d9fdd3]' 
                                      : '-left-[6px] border-t-white'
                                  }`}></div>
+
+                                 {msg.hasMedia && (
+                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
+                                         <PaperclipIcon size={12}/> Mídia Oculta
+                                     </div>
+                                 )}
+                                 
                                  <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
+                                 
                                  <div className="absolute bottom-1 right-2 flex items-center gap-1">
                                      <span className="text-[10px] text-slate-500/80">
                                          {formatTime(msg.timestamp)}
@@ -1254,9 +1316,15 @@ const App: React.FC = () => {
                         ))}
                      </div>
 
+                     {/* Input Area */}
                      <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
-                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors"><Smile size={24} /></button>
-                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors"><PaperclipIcon size={22} /></button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <Smile size={24} />
+                        </button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <PaperclipIcon size={22} />
+                        </button>
+                        
                         <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
                             <input 
                                 type="text" 
@@ -1267,9 +1335,16 @@ const App: React.FC = () => {
                                 placeholder="Digite uma mensagem..." 
                             />
                         </div>
-                        <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
-                            <Send size={20} className="ml-0.5" />
-                        </button>
+
+                        {newMessage.trim() ? (
+                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
+                                <Send size={20} className="ml-0.5" />
+                            </button>
+                        ) : (
+                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                                <Mic size={24} />
+                            </button>
+                        )}
                      </div>
                   </>
                 ) : (
@@ -1303,7 +1378,7 @@ const App: React.FC = () => {
                          <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
                          <div className="space-y-4">
                              <div>
-                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Extraído do Banco)</label>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
                                  <div className="relative">
                                      <input 
                                         list="reasons-list"
@@ -1318,6 +1393,7 @@ const App: React.FC = () => {
                                         ))}
                                      </datalist>
                                  </div>
+                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
                              </div>
                              
                              <div>
@@ -1386,6 +1462,11 @@ const App: React.FC = () => {
                                  </div>
                              </div>
                          ))}
+                         {aiConfig.knowledgeRules.length === 0 && (
+                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
+                             </div>
+                         )}
                      </div>
                  )}
               </div>
