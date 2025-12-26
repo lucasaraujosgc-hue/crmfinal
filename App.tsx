@@ -2,17 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
-  User, X, Save, Rocket, Trello, Edit, Power, Phone,
-  MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu, Terminal,
-  ChevronRight, Globe, ShieldCheck, Zap, Activity, BarChart3, PieChart as PieChartIcon,
-  Database, Filter, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode
+  User, X, Rocket, Trello, Edit,
+  MoreVertical, Smile, Check, Cpu, Terminal,
+  Zap, Activity,
+  Database, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Cell, AreaChart, Area
-} from 'recharts';
-import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
-import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
+import { CompanyResult, Status, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
+import { DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Custom Hooks ---
@@ -294,9 +290,6 @@ const App: React.FC = () => {
   
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
-
-  // Import Process State
-  const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
 
   // Filters State
   const [filters, setFilters] = useState({
@@ -679,7 +672,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* LOGS TAB - NEW */}
+          {/* LOGS TAB */}
           {activeTab === 'logs' && (
              <div className="max-w-[1400px] mx-auto animate-fade-in pb-20 space-y-6">
                  <div className="flex items-center justify-between">
@@ -722,7 +715,7 @@ const App: React.FC = () => {
              </div>
           )}
 
-          {/* CAMPAIGNS - WIZARD RESTORED & COMPACTED */}
+          {/* CAMPAIGNS - WIZARD */}
           {activeTab === 'campaigns' && (
              <div className="max-w-[1600px] mx-auto animate-fade-in pb-32">
                  {!isCreatingCampaign ? (
@@ -913,7 +906,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* KNOWLEDGE TAB (Compactada) */}
+          {/* KNOWLEDGE TAB */}
           {activeTab === 'knowledge' && (
             <div className="max-w-[1400px] mx-auto space-y-8 pb-32 animate-fade-in">
                 <div className="flex items-center justify-between bg-white p-8 rounded-[40px] shadow-lg border border-slate-50 relative overflow-hidden group">
@@ -1035,7 +1028,7 @@ const App: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* API KEYS INPUT - ADICIONADO AQUI */}
+                        {/* API KEYS INPUT */}
                         <div className="mt-6 space-y-3 animate-fade-in border-t border-slate-100 pt-6">
                             <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">
                                 API Key ({aiConfig.provider === 'gemini' ? 'Google AI Studio' : 'Groq Cloud'})
@@ -1090,12 +1083,17 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end pt-4">
-                    <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary py-4 px-12 uppercase font-black text-xs tracking-[0.4em] shadow-[0_20px_40px_-12px_rgba(37,99,235,0.4)] rounded-2xl hover:scale-[1.03] active:scale-95 transition-all duration-300">Salvar Todas Alterações</button>
+                    <button 
+                        onClick={() => saveAiConfig(aiConfig)} 
+                        disabled={isSavingConfig}
+                        className="btn-primary py-4 px-12 uppercase font-black text-xs tracking-[0.4em] shadow-[0_20px_40px_-12px_rgba(37,99,235,0.4)] rounded-2xl hover:scale-[1.03] active:scale-95 transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed">
+                        {isSavingConfig ? 'Salvando...' : 'Salvar Todas Alterações'}
+                    </button>
                 </div>
             </div>
           )}
 
-          {/* WHATSAPP TAB - COMPLETE AND FIXED */}
+          {/* WHATSAPP TAB */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6 animate-fade-in max-w-[1800px] mx-auto">
                 {waSession.status !== 'connected' ? (
