@@ -1,4 +1,5 @@
 
+
 export enum Status {
   SUCCESS = 'Sucesso',
   ERROR = 'Erro',
@@ -40,6 +41,8 @@ export interface CompanyResult {
   lastMessageSent?: string;
   aiAnalysis?: string;
   aiActive?: boolean; 
+  // Added to fix property missing error in App.tsx
+  wa_id?: string;
 }
 
 export interface ProcessingStats {
