@@ -89,6 +89,30 @@ db.serialize(() => {
   )`);
 });
 
+// --- SISTEMA DE LOGS EM MEMÓRIA (RAM) ---
+// Mantém os logs apenas enquanto o servidor roda, sem tocar no SQLite.
+const memoryLogs = [];
+
+function logSystem(type, source, message, meta = {}) {
+    const timestamp = new Date().toISOString();
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    
+    // Adiciona ao início do array (mais recente primeiro)
+    memoryLogs.unshift({
+        id: uuidv4(),
+        timestamp,
+        type,
+        source,
+        message,
+        meta: JSON.stringify(meta)
+    });
+
+    // Mantém apenas os últimos 200 logs na memória para não pesar
+    if (memoryLogs.length > 200) {
+        memoryLogs.pop();
+    }
+}
+
 let aiConfig = {
   provider: 'gemini',
   apiKeys: { gemini: '', groq: '' },
@@ -133,34 +157,71 @@ const client = new Client({
 let qrCodeData = null;
 let clientReady = false;
 
-client.on('qr', (qr) => QRCode.toDataURL(qr, (err, url) => qrCodeData = url));
-client.on('ready', () => { clientReady = true; console.log('WhatsApp Conectado!'); });
+client.on('qr', (qr) => {
+    QRCode.toDataURL(qr, (err, url) => qrCodeData = url);
+    logSystem('info', 'whatsapp', 'Novo QR Code gerado');
+});
+
+client.on('ready', () => { 
+    clientReady = true; 
+    logSystem('info', 'whatsapp', 'Cliente WhatsApp conectado e pronto'); 
+});
 
 // --- LÓGICA DE MENSAGENS E ASSOCIAÇÃO PROFUNDA ---
 client.on('message', async (msg) => {
-    if (msg.fromMe || msg.from.includes('status@broadcast') || msg.from.includes('@g.us')) return;
-    if (!aiConfig.aiActive || isAutoReply(msg.body)) return;
+    if (msg.fromMe) return;
 
     const waId = msg.from;
+    logSystem('msg_in', 'whatsapp', `Mensagem recebida de ${waId}`, { body: msg.body });
+
+    if (waId.includes('status@broadcast') || waId.includes('@g.us')) {
+        return; 
+    }
+
+    if (!aiConfig.aiActive) {
+        logSystem('ai_skip', 'engine', 'IA Global está desativada nas configurações');
+        return;
+    }
+
+    if (isAutoReply(msg.body)) {
+        logSystem('ai_skip', 'engine', 'Detectada mensagem automática/saudação genérica', { body: msg.body });
+        return;
+    }
+
     const rawSenderPhone = waId.split('@')[0].replace(/\D/g, '');
-    
-    // Tenta encontrar usando os últimos 8 dígitos para evitar problemas com nono dígito/DDD
     const last8 = rawSenderPhone.slice(-8);
 
-    db.all(`SELECT * FROM resultado WHERE wa_id = ? OR telefone LIKE ? AND ai_active = 1`, 
+    db.all(`SELECT * FROM resultado WHERE wa_id = ? OR telefone LIKE ?`, 
            [waId, `%${last8}%`], async (err, rows) => {
-            if (err || !rows || rows.length === 0) return;
+            
+            if (err) {
+                logSystem('error', 'database', 'Erro ao buscar lead', { error: err.message });
+                return;
+            }
 
-            // Filtragem precisa em JavaScript para garantir match
+            if (!rows || rows.length === 0) {
+                logSystem('ai_skip', 'database', 'Telefone não encontrado na base de leads', { phone: rawSenderPhone });
+                return;
+            }
+
+            // Filtragem precisa em JavaScript
             const company = rows.find(r => {
                 if (r.wa_id === waId) return true;
                 const dbPhone = (r.telefone || '').replace(/\D/g, '');
                 return dbPhone.endsWith(rawSenderPhone) || rawSenderPhone.endsWith(dbPhone);
             });
 
-            if (!company) return;
+            if (!company) {
+                 logSystem('ai_skip', 'database', 'Match impreciso de telefone', { phone: rawSenderPhone });
+                 return;
+            }
 
-            // Atualiza wa_id para facilitar buscas futuras
+            if (company.ai_active !== 1) {
+                logSystem('ai_skip', 'engine', `IA desativada especificamente para este lead: ${company.razao_social}`);
+                return;
+            }
+
+            // Atualiza wa_id se necessário
             if (company.wa_id !== waId) {
                 db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [waId, company.id]);
             }
@@ -172,7 +233,7 @@ client.on('message', async (msg) => {
             if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
                 const leadMotivoNorm = normalizeText(company.motivo_situacao_cadastral);
                 
-                // Busca a regra mais específica (a que contiver mais palavras coincidentes ou for substring)
+                // Busca a regra mais específica
                 const matchedRule = aiConfig.knowledgeRules.find(r => {
                     if (!r.isActive || !r.motivoSituacao) return false;
                     const ruleMotivoNorm = normalizeText(r.motivoSituacao);
@@ -218,12 +279,15 @@ ${ruleContext}
             try {
                 const provider = aiConfig.provider || 'gemini';
                 let finalText = "";
+                
+                logSystem('info', 'ai_gen', `Gerando resposta via ${provider}...`, { empresa: company.razao_social, regra: matchedRuleName });
+
                 if (provider === 'groq') {
                     const groq = new Groq({ apiKey: aiConfig.apiKeys?.groq || "" });
                     const chatCompletion = await groq.chat.completions.create({
                         messages: [{ role: "system", content: strictInstruction }, { role: "user", content: msg.body || "" }],
                         model: aiConfig.model || "llama-3.1-8b-instant",
-                        temperature: aiConfig.temperature || 0.5 // Menor temperatura para seguir regras
+                        temperature: aiConfig.temperature || 0.5 
                     });
                     finalText = chatCompletion.choices[0]?.message?.content || "";
                 } else {
@@ -237,14 +301,19 @@ ${ruleContext}
                 }
                 
                 if (finalText && finalText.length > 2) {
-                    // Delay humano simulado (3s + tamanho da msg)
+                    // Delay humano para naturalidade
                     setTimeout(async () => {
                         await client.sendMessage(msg.from, finalText);
+                        logSystem('ai_success', 'whatsapp', `Resposta enviada para ${company.razao_social}`, { resposta: finalText });
                         db.run(`UPDATE resultado SET campaign_status = 'replied', last_contacted = ? WHERE id = ?`, [new Date().toISOString(), company.id]);
-                        console.log(`[AI] Respondido para ${company.razao_social} (Regra: ${matchedRuleName})`);
                     }, 3000 + (Math.random() * 2000));
+                } else {
+                    logSystem('error', 'ai_gen', 'IA gerou resposta vazia');
                 }
-            } catch (error) { console.error('[AI] Erro:', error); }
+            } catch (error) { 
+                logSystem('error', 'ai_gen', 'Falha na geração da IA', { error: error.message });
+                console.error('[AI] Erro:', error); 
+            }
         }
     );
 });
@@ -256,7 +325,7 @@ function startCampaignSending(campaignId, message) {
     const processQueue = () => {
         db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND (campaign_status = 'queued' OR campaign_status = 'pending') LIMIT 1`, [campaignId], async (err, lead) => {
             if (err || !lead) {
-                console.log(`[Campaign] Fila da campanha ${campaignId} finalizada ou vazia.`);
+                logSystem('info', 'campaign', `Fila da campanha ${campaignId} finalizada.`);
                 return;
             }
             if (!clientReady) return setTimeout(processQueue, 5000);
@@ -268,13 +337,14 @@ function startCampaignSending(campaignId, message) {
                 
                 const sentMsg = await client.sendMessage(actualTarget, message);
                 
+                logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: actualTarget });
+
                 db.run(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ?, wa_id = ? WHERE id = ?`, 
                        [new Date().toISOString(), sentMsg.to, lead.id], () => {
-                    // Intervalo humano entre 15 e 30 segundos
                     setTimeout(processQueue, Math.floor(Math.random() * 15000) + 15000);
                 });
             } catch (e) {
-                console.error(`[Campaign] Erro ao enviar para ${lead.telefone}:`, e.message);
+                logSystem('error', 'campaign', `Erro envio campanha para ${lead.telefone}`, { error: e.message });
                 db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 3000));
             }
         });
@@ -287,6 +357,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // API Endpoints
+app.get('/api/logs', (req, res) => {
+    // Retorna os logs da memória RAM
+    res.json(memoryLogs);
+});
+
 app.get('/api/config', (req, res) => res.json(aiConfig));
 app.post('/api/config/ai-rules', (req, res) => {
     const { rules, persona, temperature, model, aiActive, provider, apiKeys } = req.body;
