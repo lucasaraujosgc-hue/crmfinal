@@ -1102,7 +1102,7 @@ const App: React.FC = () => {
                       <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center relative overflow-hidden max-w-lg w-full">
                           <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-emerald-600"></div>
                           <h2 className="text-3xl font-black text-slate-800 mb-2 uppercase tracking-tight">Conectar WhatsApp</h2>
-                          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Abra o App > Configurações > Aparelhos Conectados</p>
+                          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Abra o App &gt; Configurações &gt; Aparelhos Conectados</p>
                           
                           <div className="relative inline-block p-4 bg-white rounded-3xl shadow-inner border border-slate-100 mx-auto">
                               {waSession.qrCode ? (
