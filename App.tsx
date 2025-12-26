@@ -1,22 +1,20 @@
 
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
-  User, X, Save, Rocket, CheckSquare, Square, Trello, Edit, Power, Phone,
-  MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu, Terminal,
-  Filter, BarChart3, PieChart as PieChartIcon, Activity, Mic, ChevronRight, Globe, ShieldCheck, Zap
+  Briefcase, MessageSquare, User, Paperclip, Mic, X, Save,
+  BarChart3, Rocket, Sparkles, CheckSquare, Square, Trello, MoreHorizontal, PauseCircle, PlayCircle, Edit,
+  ToggleLeft, ToggleRight, Power, Phone, MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu
 } from 'lucide-react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Cell, PieChart, Pie, AreaChart, Area
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
 import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
 
-// --- Custom Hooks (Maintained Lógica original) ---
+// --- Hooks ---
 
 function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
   const [storedValue, setStoredValue] = useState<T>(() => {
@@ -25,6 +23,7 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
+      console.warn(error);
       return initialValue;
     }
   });
@@ -36,7 +35,9 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(key, JSON.stringify(valueToStore));
       }
-    } catch (error) {}
+    } catch (error) {
+      console.warn(error);
+    }
   };
   return [storedValue, setValue];
 }
@@ -52,1087 +53,1570 @@ function useInterval(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
-// --- Helpers ---
+// --- HELPERS ---
 
+// Limpa o motivo removendo o endereço de correspondência
 const cleanReasonText = (text: string | null | undefined) => {
     if (!text) return '';
-    return text.split('Endereço de Correspondência')[0].split('Endereço:')[0].trim();
+    // Corta nas palavras chaves comuns de endereço da SEFAZ
+    return text.split('Endereço de Correspondência')[0]
+               .split('Endereço:')[0]
+               .split('Endereco de Correspondencia')[0]
+               .trim();
 };
 
 const formatTime = (timestamp: number) => {
     if (!timestamp) return '';
-    return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 const getInitials = (name: string) => {
     return name
         .split(' ')
-        .filter(n => n.length > 0)
         .map(n => n[0])
         .slice(0, 2)
         .join('')
         .toUpperCase();
 };
 
-// --- Premium Subcomponents ---
+// --- EXTRACTED COMPONENTS ---
 
-const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, variant?: string }) => {
-  const styles: Record<string, string> = {
-    default: 'bg-slate-100 text-slate-600 border-slate-200',
-    success: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
-    warning: 'bg-amber-50 text-amber-700 border-amber-200/50',
-    danger: 'bg-rose-50 text-rose-700 border-rose-200/50',
-    brand: 'bg-brand-50 text-brand-700 border-brand-200/50',
-    info: 'bg-sky-50 text-sky-700 border-sky-200/50',
-  };
-  return (
-    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${styles[variant] || styles.default} backdrop-blur-sm`}>
-      {children}
-    </span>
-  );
-};
+const FilterBar = React.memo(({ filters, setFilters, availableCities, availableReasons, onRefresh }: any) => (
+  <div className="card-premium p-4 flex flex-col gap-4 mb-6">
+    <div className="flex flex-col md:flex-row gap-4">
+      <div className="flex-1 relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+        <input 
+          type="text" 
+          placeholder="Buscar por Nome, IE ou CNPJ..." 
+          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 outline-none transition-all"
+          value={filters.search}
+          onChange={e => setFilters((prev: any) => ({...prev, search: e.target.value}))}
+        />
+      </div>
+      <button onClick={onRefresh} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><RefreshCw size={20} /></button>
+    </div>
 
-const SystemLogTerminal = ({ logs }: { logs: any[] }) => {
-    const scrollRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, [logs]);
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <select className="input-premium py-2 text-sm" value={filters.city} onChange={e => setFilters((prev: any) => ({...prev, city: e.target.value}))}>
+        <option value="">Todas as Cidades</option>
+        {availableCities.map((c: string) => <option key={c} value={c}>{c}</option>)}
+      </select>
 
-    const getLogIcon = (level: string) => {
-      switch(level) {
-        case 'error': return <AlertCircle size={12} className="text-rose-500" />;
-        case 'success': return <CheckCircle2 size={12} className="text-emerald-500" />;
-        case 'ai': return <Bot size={12} className="text-brand-400" />;
-        case 'message': return <MessageCircle size={12} className="text-sky-400" />;
-        default: return <Activity size={12} className="text-slate-500" />;
-      }
-    };
+      <select className="input-premium py-2 text-sm" value={filters.reason} onChange={e => setFilters((prev: any) => ({...prev, reason: e.target.value}))}>
+        <option value="">Todos os Motivos</option>
+        {availableReasons.map((r: string) => <option key={r} value={r}>{r}</option>)}
+      </select>
 
-    return (
-        <div className="card-premium bg-[#0a0f1d] border-slate-800 flex flex-col h-full overflow-hidden shadow-2xl group ring-1 ring-white/5">
-            <div className="bg-[#111827] px-5 py-3.5 border-b border-white/5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="flex gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80"></div>
-                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
-                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
+      <select className="input-premium py-2 text-sm" value={filters.statusWa} onChange={e => setFilters((prev: any) => ({...prev, statusWa: e.target.value}))}>
+        <option value="all">Status WhatsApp: Todos</option>
+        <option value="pending">Pendente</option>
+        <option value="queued">Fila de Envio</option>
+        <option value="sent">Enviado</option>
+        <option value="replied">Respondeu</option>
+        <option value="interested">Interessado</option>
+        <option value="not_interested">Descartado</option>
+        <option value="error">Erro</option>
+      </select>
+
+      <select className="input-premium py-2 text-sm" value={filters.hasAccountant} onChange={e => setFilters((prev: any) => ({...prev, hasAccountant: e.target.value}))}>
+        <option value="all">Contador: Todos</option>
+        <option value="yes">Com Contador</option>
+        <option value="no">Sem Contador</option>
+      </select>
+
+      <select className="input-premium py-2 text-sm" value={filters.hasPhone} onChange={e => setFilters((prev: any) => ({...prev, hasPhone: e.target.value}))}>
+        <option value="all">Telefone: Todos</option>
+        <option value="yes">Com Telefone</option>
+        <option value="no">Sem Telefone</option>
+      </select>
+    </div>
+  </div>
+));
+
+const CompanyTable = React.memo(({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi }: any) => (
+    <div className="card-premium overflow-hidden relative">
+      <table className="w-full text-sm text-left mt-2">
+        <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+          <tr>
+            {selectable && (
+              <th className="px-4 py-4 w-10 text-center">
+                  <button onClick={toggleSelectAll} className="hover:text-brand-600">
+                  {selectedIds.size === companies.length && companies.length > 0 ? <CheckSquare size={18} /> : <Square size={18} />}
+                  </button>
+              </th>
+            )}
+            <th className="px-6 py-4 w-[350px]">Empresa</th>
+            <th className="px-6 py-4">Situação</th>
+            <th className="px-6 py-4">Status WhatsApp</th>
+            <th className="px-6 py-4 text-center">IA Ativa</th>
+            <th className="px-6 py-4">Motivo</th>
+            <th className="px-6 py-4">Município</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {companies.slice(0, 100).map((company: CompanyResult) => (
+            <tr key={company.id} className={`hover:bg-slate-50/80 transition-colors ${selectedIds.has(company.id) ? 'bg-brand-50/30' : ''}`}>
+              {selectable && (
+                  <td className="px-4 py-4 text-center">
+                  <button onClick={() => toggleSelection(company.id)} className={`${selectedIds.has(company.id) ? 'text-brand-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                      {selectedIds.has(company.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                  </button>
+                  </td>
+              )}
+              <td className="px-6 py-4">
+                <div className="flex flex-col gap-1.5">
+                    {/* Razão Social em Destaque */}
+                    <p className="font-bold text-slate-800 text-sm leading-tight">{company.razaoSocial?.replace('Razão Social:', '').trim() || 'N/D'}</p>
+                    
+                    {/* Nome Fantasia Secundário (só se diferente da razão) */}
+                    {company.nomeFantasia && company.nomeFantasia !== company.razaoSocial && (
+                         <p className="text-xs text-slate-500 font-medium uppercase">{company.nomeFantasia.replace('Nome Fantasia:', '').trim()}</p>
+                    )}
+                    
+                    {/* Badges de IDs */}
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                        <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
+                           CNPJ: {company.cnpj?.replace('CNPJ:', '').trim()}
+                        </span>
+                        <span className="bg-white border border-slate-200 text-[10px] px-1.5 py-0.5 rounded text-slate-600 font-mono">
+                           IE: {company.inscricaoEstadual?.replace('Inscrição Estadual:', '').trim()}
+                        </span>
                     </div>
-                    <h3 className="text-[10px] font-mono font-black text-slate-400 flex items-center gap-2 uppercase tracking-[0.2em] ml-2">
-                        <Terminal size={14} className="text-brand-500" /> Kernel Activity
-                    </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                  <span className="text-[9px] font-mono text-emerald-500/60 font-bold uppercase">Live</span>
-                </div>
-            </div>
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 font-mono text-[11px] space-y-2.5 custom-scrollbar bg-black/40">
-                {logs.length === 0 && (
-                  <div className="flex items-center gap-2 text-slate-700 italic">
-                    <RefreshCw size={12} className="animate-spin" />
-                    Aguardando sincronização do servidor...
-                  </div>
-                )}
-                {logs.slice().reverse().map((log) => (
-                    <div key={log.id} className="flex gap-4 border-l border-white/5 pl-4 py-1.5 group/line hover:bg-white/[0.02] transition-colors">
-                        <span className="text-slate-600 shrink-0 tabular-nums font-medium">{new Date(log.timestamp).toLocaleTimeString([], {hour12:false})}</span>
-                        <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                            <span className="shrink-0 mt-0.5">{getLogIcon(log.level)}</span>
-                            <span className={`break-words leading-relaxed ${
-                                log.level === 'error' ? 'text-rose-400 font-semibold' : 
-                                log.level === 'success' ? 'text-emerald-400' :
-                                log.level === 'ai' ? 'text-brand-300' :
-                                log.level === 'message' ? 'text-sky-300' : 'text-slate-300'
-                            }`}>
-                                <span className="opacity-30 mr-1.5">[{log.level.toUpperCase()}]</span>
-                                {log.message}
-                            </span>
+
+                    {/* Data da Situação movida para cá */}
+                    {company.dataSituacaoCadastral && (
+                        <div className="flex items-center gap-1 mt-1 text-rose-600">
+                            <AlertCircle size={10} />
+                            <span className="text-[10px] font-bold">Desde: {company.dataSituacaoCadastral}</span>
                         </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
+                    )}
+                </div>
+              </td>
+              <td className="px-6 py-4 align-top">
+                <span className={`inline-flex px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                  company.situacaoCadastral?.toUpperCase().includes('ATIVA') 
+                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                  : 'bg-rose-100 text-rose-700 border border-rose-200'
+                }`}>
+                  {company.situacaoCadastral?.replace('Situação Cadastral Vigente:', '').trim() || 'N/D'}
+                </span>
+              </td>
+              <td className="px-6 py-4 align-top">
+                   <StatusBadge status={company.campaignStatus} />
+              </td>
+              <td className="px-6 py-4 align-top text-center">
+                  <button 
+                    onClick={() => onToggleAi && onToggleAi(company.id, company.aiActive)}
+                    className={`p-1.5 rounded-full transition-colors ${
+                        company.aiActive 
+                        ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100' 
+                        : 'bg-slate-50 text-slate-400 hover:bg-slate-100 border border-slate-100'
+                    }`}
+                    title={company.aiActive ? "Desativar IA" : "Ativar IA"}
+                  >
+                      {company.aiActive ? <Bot size={18} /> : <Power size={18} />}
+                  </button>
+              </td>
+              <td className="px-6 py-4 align-top text-xs text-slate-500 truncate max-w-[200px]" title={company.motivoSituacao}>
+                  {cleanReasonText(company.motivoSituacao || 'N/D')}
+              </td>
+              <td className="px-6 py-4 align-top font-medium text-slate-700">{company.municipio?.replace('Município:', '').trim() || '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+));
 
 const StatusBadge = ({ status }: { status: string }) => {
     const map: Record<string, string> = {
-        'pending': 'bg-slate-100 text-slate-600 border-slate-200/50',
-        'queued': 'bg-amber-100 text-amber-700 border-amber-200/50',
-        'sent': 'bg-sky-100 text-sky-700 border-sky-200/50',
-        'replied': 'bg-purple-100 text-purple-700 border-purple-200/50',
-        'interested': 'bg-emerald-100 text-emerald-700 border-emerald-200/50',
-        'not_interested': 'bg-rose-100 text-rose-700 border-rose-200/50',
-        'error': 'bg-red-50 text-red-700 border-red-200/50',
-        'skipped': 'bg-slate-200 text-slate-500 border-slate-300/50'
+        'pending': 'bg-slate-100 text-slate-600',
+        'queued': 'bg-amber-100 text-amber-700',
+        'sent': 'bg-blue-100 text-blue-700',
+        'replied': 'bg-purple-100 text-purple-700',
+        'interested': 'bg-emerald-100 text-emerald-700',
+        'not_interested': 'bg-rose-100 text-rose-700',
+        'error': 'bg-red-100 text-red-700',
+        'skipped': 'bg-gray-100 text-gray-500'
     };
     const labels: Record<string, string> = {
         'pending': 'Pendente',
         'queued': 'Fila',
         'sent': 'Enviado',
         'replied': 'Respondeu',
-        'interested': 'Quente',
-        'not_interested': 'Perdido',
+        'interested': 'Interessado',
+        'not_interested': 'Descartado',
         'error': 'Erro',
         'skipped': 'Sem Zap'
     };
     return (
-        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-sm ${map[status] || map['pending']}`}>
+        <span className={`px-2 py-1 rounded-full text-xs font-bold ${map[status] || map['pending']}`}>
             {labels[status] || status}
         </span>
+    )
+}
+
+const KanbanCard: React.FC<{ company: CompanyResult, onClick: () => void }> = ({ company, onClick }) => (
+    <div onClick={onClick} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-brand-300 group">
+        <div className="flex justify-between items-start mb-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">{company.inscricaoEstadual}</span>
+            <div className="flex gap-1">
+                {company.aiActive && <Bot size={14} className="text-emerald-500" />}
+                {company.telefone && <MessageCircle size={14} className="text-brand-500"/>}
+            </div>
+        </div>
+        <h4 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2">{company.razaoSocial}</h4>
+        <p className="text-xs text-slate-500 mb-2 truncate">{company.municipio}</p>
+        <div className="flex justify-between items-center border-t border-slate-50 pt-2">
+             <StatusBadge status={company.campaignStatus} />
+             <span className="text-[10px] text-slate-400">{new Date().toLocaleDateString()}</span>
+        </div>
+    </div>
+);
+
+const KanbanColumn = ({ title, status, companies, onMove, onCardClick }: any) => {
+    return (
+        <div className="min-w-[280px] w-[280px] flex flex-col h-full bg-slate-100/50 rounded-2xl border border-slate-200/60 flex-shrink-0">
+            <div className="p-3 border-b border-slate-200 flex justify-between items-center bg-white/50 rounded-t-2xl">
+                <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${
+                        status === 'interested' ? 'bg-emerald-500' :
+                        status === 'replied' ? 'bg-purple-500' :
+                        status === 'sent' ? 'bg-blue-500' : 'bg-slate-400'
+                    }`}></span>
+                    {title}
+                </h3>
+                <span className="bg-white px-2 py-0.5 rounded text-xs font-bold text-slate-500 border border-slate-200">
+                    {companies.length}
+                </span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                {companies.map((c: any) => (
+                    <KanbanCard key={c.id} company={c} onClick={() => onCardClick(c)} />
+                ))}
+            </div>
+        </div>
+    )
+}
+
+const SelectedLeadModal = ({ company, onClose, onGoToChat }: any) => {
+    if (!company) return null;
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-slide-up">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 className="text-xl font-bold text-slate-800">Detalhes do Lead</h3>
+                    <button onClick={onClose}><X className="text-slate-400 hover:text-slate-600" /></button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-bold">Empresa</label>
+                        <p className="text-lg font-semibold text-slate-900">{company.razaoSocial}</p>
+                        <p className="text-sm text-slate-500">{company.cnpj} | IE: {company.inscricaoEstadual}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Município</label>
+                            <p className="text-sm font-medium">{company.municipio}</p>
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500 uppercase font-bold">Situação</label>
+                            <p className="text-sm font-medium">{company.situacaoCadastral}</p>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-bold">Motivo da Inaptidão</label>
+                        <div className="bg-rose-50 text-rose-800 p-3 rounded-lg text-sm border border-rose-100">
+                            {cleanReasonText(company.motivoSituacao) || 'Não informado'}
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                         <button onClick={onClose} className="btn-secondary">Fechar</button>
+                         <button onClick={() => onGoToChat(company)} className="btn-primary" disabled={!company.telefone}>
+                             <MessageCircle size={18} /> Ir para WhatsApp
+                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+const ApiKeyInput = ({ label, provider, currentKey, onChange, activeProvider }: any) => {
+    const [show, setShow] = useState(false);
+    return (
+        <div className={`p-4 rounded-xl border transition-all ${activeProvider === provider ? 'bg-brand-50 border-brand-200' : 'bg-white border-slate-200'}`}>
+            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center justify-between">
+                <span>{label}</span>
+                {activeProvider === provider && <span className="text-xs font-bold text-brand-600 px-2 py-0.5 bg-white rounded-full border border-brand-100">ATIVO</span>}
+            </label>
+            <div className="relative">
+                <input 
+                    type={show ? "text" : "password"}
+                    className="input-premium pr-10"
+                    value={currentKey || ''}
+                    onChange={(e) => onChange(provider, e.target.value)}
+                    placeholder={`Cole sua API Key do ${label}...`}
+                />
+                <button onClick={() => setShow(!show)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                    {show ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+            </div>
+        </div>
     );
 };
 
-// --- Main App Component ---
+// --- MAIN APP COMPONENT ---
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   
   // Data States
   const [companies, setCompanies] = useState<CompanyResult[]>([]);
-  const [systemLogs, setSystemLogs] = useState<any[]>([]);
   const [imports, setImports] = useState<ImportBatch[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
-  const [filters, setFilters] = useState({ search: '', city: 'Todos', reason: 'Todos', waStatus: 'Todos' });
-  const [uniqueFilters, setUniqueFilters] = useState({ municipios: [] as string[], motivos: [] as string[] });
+  const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
 
-  // UI State
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Import Process State
   const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
-  
-  // WhatsApp Tab State
-  const [chats, setChats] = useState<any[]>([]);
-  const [activeChat, setActiveChat] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
-  const [newMessage, setNewMessage] = useState('');
+  const [processProgress, setProcessProgress] = useState({ total: 0, processed: 0, status: '' });
 
-  // AI & Knowledge
-  // Fix for line 212: Add missing apiKeys property to align with AIConfig interface
+  // Filters State
+  const [filters, setFilters] = useState({
+    search: '',
+    city: '',
+    reason: '',
+    hasAccountant: 'all',
+    status: 'all',
+    statusWa: 'all', // Added WhatsApp Status Filter
+    hasPhone: 'all'
+  });
+  
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [availableReasons, setAvailableReasons] = useState<string[]>([]);
+
+  // Selection & Bulk Actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  // Kanban Selection
+  const [selectedKanbanLead, setSelectedKanbanLead] = useState<CompanyResult | null>(null);
+
+  // Campaign Wizard State
+  const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+  const [campaignStep, setCampaignStep] = useState(1);
+  const [newCampaign, setNewCampaign] = useState({
+     name: '',
+     description: '',
+     initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+     aiPersona: DEFAULT_AI_PERSONA
+  });
+
+  // AI & Rules
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
     model: 'gemini-3-flash-preview',
     provider: 'gemini',
     apiKeys: { gemini: '', groq: '' },
     persona: DEFAULT_AI_PERSONA,
-    knowledgeRules: DEFAULT_KNOWLEDGE_RULES,
+    knowledgeRules: [],
     temperature: 0.7,
     aiActive: true
   });
   const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
 
-  // --- Logic original mantida conforme solicitado ---
+  // WhatsApp State
+  const [waSession, setWaSession] = useState<WhatsAppSession>({ status: 'disconnected' });
+  const [chats, setChats] = useState<any[]>([]);
+  const [activeChat, setActiveChat] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
-  const fetchData = async () => {
-    try {
-      const [comp, conf, imp, filtersRes] = await Promise.all([
-        fetch('/get-all-results'),
-        fetch('/api/config'),
-        fetch('/get-imports'),
-        fetch('/api/unique-filters')
-      ]);
-      if (comp.ok) setCompanies(await comp.json());
-      if (conf.ok) {
-          const configFromServer = await conf.json();
-          setAiConfig(prev => ({ ...prev, ...configFromServer }));
-      }
-      if (imp.ok) setImports(await imp.json());
-      if (filtersRes.ok) setUniqueFilters(await filtersRes.json());
-    } catch (e) {}
-  };
-
-  const fetchLogs = async () => {
-    try {
-      const res = await fetch('/api/system-logs');
-      if (res.ok) setSystemLogs(await res.json());
-    } catch (e) {}
-  };
-
-  const fetchWaStatus = async () => {
-    try {
-      const res = await fetch('/api/whatsapp/status');
-      if (res.ok) setWaSession(await res.json());
-    } catch (e) {}
-  };
-
+  // Initial Load
   useEffect(() => {
-    fetchData();
-    const int = setInterval(() => {
-      fetchLogs();
-      fetchWaStatus();
-    }, 3000);
-    return () => clearInterval(int);
+    fetchCompanies();
+    fetchImports();
+    fetchFilters();
+    fetchCampaigns();
+    fetchAiConfig();
   }, []);
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setIsCreatingCampaign(false);
+    setCampaignStep(1);
+    setSelectedKanbanLead(null);
+  }, [activeTab]);
+
   useInterval(() => {
+    fetchWhatsAppStatus();
     if (activeTab === 'whatsapp' && waSession.status === 'connected') {
-        fetch('/api/whatsapp/chats').then(r => r.json()).then(setChats);
-        if (activeChat) {
-            fetch(`/api/whatsapp/messages/${activeChat}`).then(r => r.json()).then(setChatMessages);
-        }
+      fetchChats();
+      if (activeChat) fetchMessages(activeChat);
     }
-  }, activeTab === 'whatsapp' ? 3000 : null);
+  }, 3000);
+
+  // Progress Polling for Import
+  useInterval(() => {
+    if (currentProcessId) {
+      fetch(`/progress/${currentProcessId}`)
+        .then(res => {
+           const reader = res.body?.getReader();
+           return new ReadableStream({
+             start(controller) {
+               function push() {
+                 reader?.read().then(({ done, value }) => {
+                   if (done) { controller.close(); return; }
+                   const chunk = new TextDecoder("utf-8").decode(value);
+                   const lines = chunk.split('\n\n');
+                   lines.forEach(line => {
+                     if (line.startsWith('data: ')) {
+                       try {
+                         const data = JSON.parse(line.replace('data: ', ''));
+                         if (data.status === 'not_found') return;
+                         setProcessProgress(data);
+                         if (data.status === 'completed' || data.status === 'error') {
+                           fetchCompanies(); 
+                           fetchImports();
+                           fetchFilters(); 
+                           setTimeout(() => setCurrentProcessId(null), 3000);
+                         }
+                       } catch (e) {}
+                     }
+                   });
+                   push();
+                 });
+               }
+               push();
+             }
+           });
+        })
+        .catch(console.error);
+    }
+  }, currentProcessId ? 1000 : null);
+
+  const fetchAiConfig = async () => {
+      try {
+          const res = await fetch('/api/config');
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data);
+          }
+      } catch (e) { console.error(e); }
+  }
 
   const saveAiConfig = async (newConfig: AIConfig) => {
+      setIsSavingConfig(true);
       try {
           const res = await fetch('/api/config/ai-rules', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newConfig)
+              body: JSON.stringify({
+                  rules: newConfig.knowledgeRules,
+                  persona: newConfig.persona,
+                  temperature: newConfig.temperature,
+                  model: newConfig.model,
+                  aiActive: newConfig.aiActive,
+                  provider: newConfig.provider,
+                  apiKeys: newConfig.apiKeys // Envia explicitamente as chaves
+              })
           });
-          if (res.ok) setAiConfig(newConfig);
-      } catch (e) { alert('Erro ao salvar config'); }
-  };
+          
+          if (res.ok) {
+              const data = await res.json();
+              setAiConfig(data.config || newConfig); // Atualiza com o retorno do server se possível
+              alert('Configurações salvas e aplicadas com sucesso!');
+          } else {
+              alert('Erro ao salvar no servidor.');
+          }
+      } catch (e) { 
+          console.error(e); 
+          alert('Erro de conexão ao salvar configurações'); 
+      } finally {
+          setIsSavingConfig(false);
+      }
+  }
 
-  const handleSendMessage = async () => {
-    if (!activeChat || !newMessage.trim()) return;
+  const cleanupOrphanedData = async () => {
+      if(!confirm("Isso apagará empresas que não têm um arquivo de importação vinculado (Ex: uploads interrompidos). Continuar?")) return;
+      try {
+          const res = await fetch('/api/cleanup', { method: 'POST' });
+          if(res.ok) {
+              alert('Limpeza concluída!');
+              fetchCompanies();
+          }
+      } catch (e) { alert('Erro ao limpar'); }
+  }
+
+  // --- API Calls ---
+
+  const fetchFilters = async () => {
     try {
-        const res = await fetch('/api/whatsapp/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chatId: activeChat, message: newMessage })
-        });
-        if (res.ok) {
-            setChatMessages(prev => [...prev, { id: uuidv4(), body: newMessage, fromMe: true, timestamp: Date.now()/1000 }]);
-            setNewMessage('');
+      const res = await fetch('/api/unique-filters');
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableCities((data.municipios as string[]) || []);
+        
+        if (data.motivos) {
+             const cleanedReasons = new Set(data.motivos.map((m: any) => cleanReasonText(m)));
+             setAvailableReasons((Array.from(cleanedReasons).filter((r) => !!r) as string[]).sort());
+        } else {
+             setAvailableReasons([]);
         }
-    } catch (e) {}
+      }
+    } catch (e) { console.error(e); }
   };
 
-  const toggleLeadAI = async (id: string, current: boolean) => {
+  const fetchCampaigns = async () => {
+      try {
+          const res = await fetch('/api/campaigns');
+          if (res.ok) setCampaigns(await res.json());
+      } catch (e) { console.error(e); }
+  };
+
+  const deleteCampaign = async (id: string) => {
+      if(!confirm("Tem certeza que deseja excluir esta campanha? Os leads voltarão para o status pendente.")) return;
+      try {
+          const res = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+          if(res.ok) {
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert("Erro ao excluir campanha");
+          }
+      } catch (e) { alert("Erro de conexão"); }
+  }
+
+  const fetchCompanies = async () => {
     try {
-        const res = await fetch('/api/leads/toggle-ai', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, active: !current })
-        });
-        if (res.ok) setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: !current } : c));
-    } catch (e) {}
+      const res = await fetch('/get-all-results');
+      if (res.ok) {
+        const data = await res.json();
+        setCompanies(data);
+        const success = data.filter((c: any) => c.status === 'Sucesso' || c.status === Status.SUCCESS).length;
+        const errors = data.filter((c: any) => c.status !== 'Sucesso' && c.status !== Status.SUCCESS).length;
+        setStats({ total: data.length, processed: data.length, success, errors });
+      }
+    } catch (error) { console.error(error); } 
+  };
+
+  const fetchImports = async () => {
+    try {
+      const res = await fetch('/get-imports');
+      if (res.ok) setImports(await res.json());
+    } catch (e) { console.error(e); }
   };
 
   const deleteImport = async (id: string) => {
-      if(!confirm("Deseja apagar esta importação e todos os seus leads?")) return;
+      if(!confirm('Tem certeza? Isso apagará todas as empresas desta lista e interromperá o processamento se estiver rodando.')) return;
       try {
-          const res = await fetch(`/api/imports/${id}`, { method: 'DELETE' });
-          if(res.ok) fetchData();
-      } catch (e) {}
+          await fetch(`/api/imports/${id}`, { method: 'DELETE' });
+          // Short delay to ensure scraping stopped and DB cleared
+          setTimeout(() => {
+              fetchImports();
+              fetchCompanies();
+          }, 1000);
+      } catch(e) { alert('Erro ao deletar'); }
   };
 
-  const filteredCompanies = useMemo(() => {
-      return companies.filter(c => {
-          const matchSearch = c.razaoSocial.toLowerCase().includes(searchTerm.toLowerCase()) || c.cnpj.includes(searchTerm);
-          const matchCity = filters.city === 'Todos' || c.municipio === filters.city;
-          const matchReason = filters.reason === 'Todos' || c.motivoSituacao === filters.reason;
-          const matchWA = filters.waStatus === 'Todos' || c.campaignStatus === filters.waStatus;
-          return matchSearch && matchCity && matchReason && matchWA;
+  const fetchWhatsAppStatus = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/status');
+      if (res.ok) {
+        const data = await res.json();
+        setWaSession({ status: data.status, qrCode: data.qr });
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchChats = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/chats');
+      if (res.ok) setChats(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchMessages = async (chatId: string) => {
+    try {
+      const res = await fetch(`/api/whatsapp/messages/${chatId}`);
+      if (res.ok) setChatMessages(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const sendMessage = async () => {
+    if (!activeChat || !newMessage.trim()) return;
+    try {
+      setChatMessages(prev => [...prev, { id: 'temp-'+Date.now(), fromMe: true, body: newMessage, timestamp: Date.now()/1000 }]);
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: activeChat, message: newMessage })
       });
-  }, [companies, searchTerm, filters]);
+      if (res.ok) {
+        setNewMessage('');
+        fetchMessages(activeChat);
+      }
+    } catch (e) { console.error(e); }
+  };
 
-  const dashboardStats = useMemo(() => {
-    const total = companies.length;
-    const inaptas = companies.filter(c => !c.situacaoCadastral.includes('ATIVA')).length;
-    const graf = [
-        { name: 'Pendente', value: companies.filter(c => c.campaignStatus === 'pending').length },
-        { name: 'Enviado', value: companies.filter(c => c.campaignStatus === 'sent').length },
-        { name: 'Respondeu', value: companies.filter(c => c.campaignStatus === 'replied').length },
-        { name: 'Interesse', value: companies.filter(c => c.campaignStatus === 'interested').length },
-    ];
-    return { total, inaptas, graf };
-  }, [companies]);
+  const createCampaign = async () => {
+      if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione empresas e dê um nome à campanha.');
+      
+      try {
+          const res = await fetch('/api/campaigns', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  ...newCampaign,
+                  leads: Array.from(selectedIds)
+              })
+          });
+          if (res.ok) {
+              alert('Campanha criada e envios iniciados!');
+              setIsCreatingCampaign(false);
+              // Reset again just in case
+              setNewCampaign({
+                  name: '',
+                  description: '',
+                  initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+                  aiPersona: DEFAULT_AI_PERSONA
+              });
+              fetchCampaigns();
+              fetchCompanies();
+          } else {
+              alert('Erro ao criar campanha');
+          }
+      } catch (e) { alert('Erro de conexão'); }
+  };
 
-  // --- Rendering UI ---
+  const updateLeadStatus = async (id: string, status: string) => {
+      try {
+          await fetch('/api/leads/status', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ id, status })
+          });
+          fetchCompanies();
+      } catch(e) { console.error(e); }
+  };
+
+  const toggleLeadAI = async (id: string, currentStatus: boolean | undefined) => {
+      const newStatus = !currentStatus;
+      try {
+          await fetch('/api/leads/toggle-ai', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ id, active: newStatus })
+          });
+          // Update local state to reflect change immediately
+          setCompanies(prev => prev.map(c => c.id === id ? { ...c, aiActive: newStatus } : c));
+      } catch(e) { console.error(e); }
+  };
+
+  // --- Filtering Logic ---
+
+  const filteredCompanies = useMemo(() => {
+    return companies.filter(c => {
+      const searchMatch = !filters.search || 
+        c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) ||
+        c.inscricaoEstadual?.includes(filters.search) ||
+        c.cnpj?.includes(filters.search);
+        
+      const cityMatch = !filters.city || c.municipio === filters.city;
+      
+      const cleanedLeadReason = cleanReasonText(c.motivoSituacao);
+      const reasonMatch = !filters.reason || 
+        (cleanedLeadReason && cleanedLeadReason.toLowerCase().includes(filters.reason.toLowerCase())) ||
+        (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+        
+      const accountantMatch = filters.hasAccountant === 'all' ? true :
+        filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador;
+        
+      const phoneMatch = filters.hasPhone === 'all' ? true :
+        filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone;
+        
+      const waMatch = filters.statusWa === 'all' ? true :
+        c.campaignStatus === filters.statusWa;
+
+      return searchMatch && cityMatch && reasonMatch && accountantMatch && phoneMatch && waMatch;
+    });
+  }, [companies, filters]);
+
+  // --- Selection Logic ---
+
+  const toggleSelection = (id: string) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedIds(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredCompanies.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredCompanies.map(c => c.id)));
+    }
+  };
+
+  const goToChat = (company: CompanyResult) => {
+      if(company.telefone) {
+          const raw = company.telefone.replace(/\D/g, '');
+          const target = raw.length < 12 ? '55' + raw : raw;
+          const chatId = target + '@c.us';
+          setActiveTab('whatsapp');
+          setActiveChat(chatId);
+          fetchMessages(chatId);
+          setSelectedKanbanLead(null); // Close modal
+      } else {
+          alert('Empresa sem telefone cadastrado.');
+      }
+  };
+
+  // Handler to reset and open campaign wizard
+  const handleOpenNewCampaign = () => {
+      setNewCampaign({
+          name: '',
+          description: '',
+          initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar.',
+          aiPersona: DEFAULT_AI_PERSONA
+      });
+      setSelectedIds(new Set());
+      setCampaignStep(1);
+      setIsCreatingCampaign(true);
+  };
+
+  // --- Render ---
+
+  // Helper to find company in active chat
+  const activeChatCompany = useMemo(() => {
+      if (!activeChat || companies.length === 0) return null;
+      
+      // 1. Try to clean the ID (only digits)
+      const cleanChatId = activeChat.replace(/\D/g, '');
+      
+      // 2. Also try to find using the chat NAME/PHONE if available in the chat list
+      // This solves the @lid issue where the ID is not the phone number
+      const currentChatObj = chats.find(c => c.id === activeChat);
+      const chatNameDigits = currentChatObj?.name?.replace(/\D/g, '') || '';
+
+      return companies.find(c => {
+          if (!c.telefone) return false;
+          const cleanCompanyPhone = c.telefone.replace(/\D/g, '');
+          
+          // Match against ID digits OR Name digits
+          return cleanChatId.includes(cleanCompanyPhone) || 
+                 cleanCompanyPhone.includes(cleanChatId) ||
+                 (chatNameDigits.length > 8 && (chatNameDigits.includes(cleanCompanyPhone) || cleanCompanyPhone.includes(chatNameDigits)));
+      });
+  }, [activeChat, companies, chats]);
 
   return (
-    <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sans selection:bg-brand-100 selection:text-brand-900">
+    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans text-slate-900">
       
-      {/* Premium Sidebar */}
-      <aside className={`${isSidebarOpen ? 'w-72' : 'w-24'} bg-[#0f172a] text-white transition-all duration-500 ease-in-out flex flex-col z-30 shadow-[4px_0_24px_rgba(0,0,0,0.15)] relative`}>
-        <div className="p-8 border-b border-white/5 flex items-center justify-between overflow-hidden">
-          {isSidebarOpen ? (
-            <div className="flex items-center gap-4 animate-fade-in">
-              <div className="w-11 h-11 bg-gradient-to-br from-brand-500 to-brand-700 rounded-2xl flex items-center justify-center shadow-[0_8px_16px_rgba(59,130,246,0.3)] ring-1 ring-white/20">
-                <Rocket className="text-white" size={24} />
-              </div>
-              <div className="min-w-0">
-                <h2 className="font-black text-xl tracking-tight leading-none bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">VIRGULA</h2>
-                <p className="text-[9px] text-brand-400 font-black uppercase tracking-[0.25em] mt-1.5 opacity-80">Intelligence CRM</p>
-              </div>
+      {/* Sidebar */}
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-brand-950 text-white transition-all duration-300 flex flex-col shadow-2xl z-20`}>
+        <div className="p-4 flex items-center justify-between border-b border-brand-800/50">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shrink-0">
+              <span className="font-bold text-white text-lg">V</span>
             </div>
-          ) : (
-            <div className="w-12 h-12 bg-brand-600/10 rounded-2xl flex items-center justify-center border border-brand-500/20 mx-auto">
-                <Rocket className="text-brand-500" size={24} />
-            </div>
-          )}
+            {isSidebarOpen && <span className="font-bold text-lg tracking-tight whitespace-nowrap">CRM VÍRGULA</span>}
+          </div>
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1 hover:bg-brand-800 rounded-lg">
+            <Menu size={18} className="text-brand-200" />
+          </button>
         </div>
 
-        <nav className="flex-1 p-4 mt-6 space-y-2 overflow-y-auto custom-scrollbar">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
           {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard', desc: 'Métricas em Tempo Real' },
-            { id: 'kanban', icon: Trello, label: 'Kanban', desc: 'Funil de Vendas' },
-            { id: 'import', icon: Upload, label: 'Importar PDF', desc: 'Extração SEFAZ' },
-            { id: 'leads', icon: FileSpreadsheet, label: 'Gestão de Leads', desc: 'Base de Empresas' },
-            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', desc: 'Atendimento Ativo', badge: waSession.status === 'connected' ? 'On' : 'Off' },
-            { id: 'knowledge', icon: BookOpen, label: 'Base de IA', desc: 'Regras Jurídicas' },
-            { id: 'settings', icon: Settings, label: 'Configurações', desc: 'API e Persona' },
+            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+            { id: 'kanban', icon: Trello, label: 'Kanban Vendas' },
+            { id: 'import', icon: Upload, label: 'Importar PDF' },
+            { id: 'companies', icon: FileSpreadsheet, label: 'Base de Empresas' },
+            { id: 'campaigns', icon: Rocket, label: 'Gestão de Campanhas' },
+            { id: 'whatsapp', icon: MessageCircle, label: 'WhatsApp', badge: waSession.status === 'connected' ? 'On' : 'Off' },
+            { id: 'knowledge', icon: BookOpen, label: 'Base de Conhecimento' },
+            { id: 'settings', icon: Settings, label: 'Configurações' },
           ].map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full group flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-300 relative ${
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group relative ${
                 activeTab === item.id 
-                  ? 'bg-brand-600 text-white shadow-[0_12px_24px_-8px_rgba(37,99,235,0.4)] scale-[1.02] ring-1 ring-white/20' 
-                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                  ? 'bg-brand-600 text-white shadow-lg' 
+                  : 'text-brand-200 hover:bg-brand-900/50 hover:text-white'
               }`}
             >
-              <div className={`shrink-0 transition-transform duration-300 ${activeTab === item.id ? 'scale-110' : 'group-hover:scale-110'}`}>
-                <item.icon size={22} strokeWidth={activeTab === item.id ? 2.5 : 2} />
-              </div>
+              <item.icon size={20} />
               {isSidebarOpen && (
-                  <div className="flex-1 flex flex-col text-left overflow-hidden">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-sm truncate">{item.label}</span>
-                        {item.badge && (
-                          <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-black ring-1 ${item.badge === 'On' ? 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/30' : 'bg-slate-700/50 text-slate-400 ring-slate-600/30'}`}>
-                            {item.badge}
-                          </span>
-                        )}
-                      </div>
-                      <span className={`text-[9px] font-medium opacity-50 truncate ${activeTab === item.id ? 'text-brand-100' : 'text-slate-500'}`}>{item.desc}</span>
-                  </div>
-              )}
-              {activeTab === item.id && (
-                <div className="absolute right-0 w-1 h-6 bg-white rounded-l-full shadow-[0_0_12px_white]"></div>
+                <>
+                  <span className="font-medium text-sm flex-1 text-left">{item.label}</span>
+                  {item.badge && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.badge === 'On' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </>
               )}
             </button>
           ))}
         </nav>
 
-        <div className="p-6 border-t border-white/5 bg-black/20">
-            <div className={`flex items-center gap-4 ${!isSidebarOpen && 'justify-center'}`}>
-                <div className="relative group">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 overflow-hidden shadow-lg group-hover:border-brand-500 transition-colors">
-                        <User size={24} />
+        {/* Global AI Toggle in Sidebar */}
+        {isSidebarOpen && (
+            <div className="p-4 border-t border-brand-800/50 bg-brand-900/30">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Bot size={18} className={aiConfig.aiActive ? "text-emerald-400" : "text-slate-400"} />
+                        <span className="text-sm font-medium">IA Geral</span>
                     </div>
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-[3px] border-[#0f172a] shadow-sm"></div>
+                    <button 
+                        onClick={() => saveAiConfig({...aiConfig, aiActive: !aiConfig.aiActive})}
+                        className={`w-10 h-5 rounded-full flex items-center transition-all p-1 ${aiConfig.aiActive ? 'bg-emerald-500 justify-end' : 'bg-slate-600 justify-start'}`}
+                    >
+                        <div className="w-3 h-3 bg-white rounded-full shadow-md"></div>
+                    </button>
                 </div>
-                {isSidebarOpen && (
-                    <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold text-white truncate">Admin Master</p>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Premium Access</p>
-                    </div>
-                )}
             </div>
-        </div>
+        )}
       </aside>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        
-        {/* Dynamic Header */}
-        <header className="h-20 bg-white/70 backdrop-blur-2xl border-b border-slate-200/60 px-10 flex items-center justify-between sticky top-0 z-20 shadow-[0_1px_12px_rgba(0,0,0,0.02)]">
-          <div className="flex items-center gap-8">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-3 hover:bg-slate-100 rounded-2xl text-slate-500 transition-all active:scale-90">
-              <Menu size={22} />
-            </button>
-            <div className="h-8 w-px bg-slate-200"></div>
-            <div>
-              <h1 className="text-xl font-black text-slate-800 uppercase tracking-tight">
-                {activeTab === 'dashboard' ? 'Overview Geral' : 
-                 activeTab === 'kanban' ? 'Funil de Vendas' :
-                 activeTab === 'import' ? 'Data Extraction' :
-                 activeTab === 'leads' ? 'Base Master SEFAZ' :
-                 activeTab === 'whatsapp' ? 'Live Chat Agent' :
-                 activeTab === 'knowledge' ? 'Kernel Jurídico' : 'Ajustes de Sistema'}
-              </h1>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1 flex items-center gap-2">
-                <Globe size={10} className="text-brand-500" /> Bahia / Real-time Sync
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-5">
-             <div className="hidden lg:flex flex-col items-end mr-4">
-               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Global Status</span>
-               <div className="flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
-                  <span className="text-[11px] font-bold text-slate-700">All Systems Normal</span>
-               </div>
-             </div>
-
-             <button onClick={fetchData} className="p-3.5 hover:bg-slate-100 rounded-2xl text-slate-400 hover:text-brand-600 transition-all group">
-                <RefreshCw size={20} className="group-hover:rotate-180 transition-transform duration-700" />
-             </button>
-             
-             <div className="h-10 w-px bg-slate-200"></div>
-
-             <div className={`flex items-center gap-3 px-5 py-2.5 rounded-2xl border shadow-sm transition-all duration-500 ${
-               waSession.status === 'connected' 
-               ? 'bg-emerald-50 border-emerald-100/50 text-emerald-700' 
-               : 'bg-rose-50 border-rose-100/50 text-rose-700'
-             }`}>
-                <div className={`w-2 h-2 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse' : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'}`}></div>
-                <span className="text-[10px] font-black uppercase tracking-widest leading-none">WhatsApp: {waSession.status.toUpperCase()}</span>
-             </div>
-          </div>
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-50 relative">
+        <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-slate-800">
+            {activeTab === 'dashboard' && 'Visão Geral'}
+            {activeTab === 'kanban' && 'Gestão de Atendimentos'}
+            {activeTab === 'import' && 'Importação de Dados'}
+            {activeTab === 'companies' && 'Base de Empresas'}
+            {activeTab === 'campaigns' && 'Campanhas de Marketing'}
+            {activeTab === 'whatsapp' && 'Atendimento'}
+            {activeTab === 'knowledge' && 'Base de Conhecimento'}
+            {activeTab === 'settings' && 'Configurações'}
+          </h1>
         </header>
 
-        {/* Dynamic Content Main */}
-        <main className="flex-1 overflow-y-auto p-10 custom-scrollbar bg-slate-50/40">
+        <div className="p-8 max-w-[1600px] mx-auto pb-20 h-[calc(100vh-80px)] overflow-y-auto">
           
-          {/* TAB: DASHBOARD INTEGRADO */}
+          {/* ... (Other tabs remain the same) ... */}
           {activeTab === 'dashboard' && (
-            <div className="space-y-10 animate-fade-in max-w-[1600px] mx-auto pb-20">
-              
-              {/* KPIs com Cards Estilizados */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {[
-                  { label: 'Base de Dados', value: dashboardStats.total, icon: FileSpreadsheet, color: 'text-brand-600', bg: 'bg-brand-50', trend: '+12%' },
-                  { label: 'Inaptas / Suspensas', value: dashboardStats.inaptas, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-50', trend: 'High Priority' },
-                  { label: 'Sessão WhatsApp', value: waSession.status === 'connected' ? 'ONLINE' : 'OFFLINE', icon: MessageCircle, color: 'text-emerald-600', bg: 'bg-emerald-50', trend: 'Encrypted' },
-                  { label: 'Inteligência IA', value: aiConfig.aiActive ? 'HABILITADA' : 'INATIVA', icon: Bot, color: 'text-brand-500', bg: 'bg-brand-50', trend: 'Active' },
+                  { label: 'Total na Base', value: stats.total, color: 'text-brand-600', bg: 'bg-brand-50' },
+                  { label: 'Sucesso Scraper', value: stats.success, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                  { label: 'Erros Leitura', value: stats.errors, color: 'text-rose-600', bg: 'bg-rose-50' },
+                  { label: 'Campanhas Ativas', value: campaigns.length, color: 'text-amber-600', bg: 'bg-amber-50' },
                 ].map((stat, i) => (
-                  <div key={i} className="card-premium p-8 group card-hover border-none relative overflow-hidden">
-                    <div className={`absolute top-0 right-0 p-8 ${stat.color} opacity-[0.03] group-hover:scale-125 group-hover:rotate-12 transition-transform duration-700`}>
-                      <stat.icon size={120} />
-                    </div>
-                    <div className="flex items-center justify-between mb-6 relative z-10">
-                        <div className={`p-4 rounded-2xl ${stat.bg} ${stat.color} group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 shadow-sm ring-1 ring-white/20`}>
-                            <stat.icon size={26} strokeWidth={2.5} />
-                        </div>
-                        <span className="text-[10px] font-black text-slate-400 bg-slate-100/50 px-2.5 py-1 rounded-lg border border-slate-200/50">{stat.trend}</span>
-                    </div>
-                    <h3 className="text-4xl font-black text-slate-900 tracking-tight mb-2 relative z-10 tabular-nums">{stat.value}</h3>
-                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] relative z-10">{stat.label}</p>
-                    <div className="mt-6 h-1 w-full bg-slate-100 rounded-full overflow-hidden relative z-10">
-                      <div className={`h-full ${stat.color.replace('text', 'bg')} w-2/3 rounded-full opacity-60`}></div>
-                    </div>
+                  <div key={i} className="card-premium p-6 hover:-translate-y-1 transition-transform">
+                    <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
+                    <h3 className="text-3xl font-bold text-slate-700">{stat.value}</h3>
                   </div>
                 ))}
               </div>
+            </div>
+          )}
 
-              {/* Grid Principal: Gráfico + Terminal */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                <div className="lg:col-span-1 h-[600px] animate-slide-up">
-                    <SystemLogTerminal logs={systemLogs} />
+          {activeTab === 'import' && (
+            <div className="space-y-8">
+              {!currentProcessId && (
+                <div className="max-w-xl mx-auto card-premium p-10 text-center border-2 border-dashed border-slate-300 hover:border-brand-400 transition-all group cursor-pointer relative bg-white">
+                  <input 
+                    type="file" 
+                    accept=".pdf" 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const formData = new FormData();
+                      formData.append('file', file);
+                      try {
+                        const res = await fetch('/start-processing', { method: 'POST', body: formData });
+                        if (res.ok) {
+                          const { processId } = await res.json();
+                          setCurrentProcessId(processId);
+                        } else {
+                          alert('Erro ao enviar arquivo.');
+                        }
+                      } catch (err) { console.error(err); alert('Erro de conexão.'); }
+                    }}
+                  />
+                  <div className="w-24 h-24 bg-brand-50 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
+                    <Upload size={40} />
+                  </div>
+                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Nova Importação SEFAZ</h3>
+                  <p className="text-slate-500 text-lg">Arraste o PDF ou clique para selecionar</p>
                 </div>
-                <div className="lg:col-span-2 space-y-10">
-                    <div className="card-premium p-10 h-[400px] flex flex-col group border-none shadow-xl animate-fade-in">
-                        <div className="flex items-center justify-between mb-10">
-                            <div>
-                              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight flex items-center gap-3">
-                                <BarChart3 size={22} className="text-brand-500" /> Fluxo de Atendimento
-                              </h3>
-                              <p className="text-xs font-medium text-slate-400 mt-1">Status de conversão por etapa do funil</p>
-                            </div>
-                            <div className="flex gap-2">
-                              <button className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-brand-50 hover:text-brand-600 transition-all"><BarChart3 size={18}/></button>
-                              <button className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:bg-brand-50 hover:text-brand-600 transition-all"><PieChartIcon size={18}/></button>
-                            </div>
-                        </div>
-                        <div className="flex-1 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={dashboardStats.graf}>
-                                    <defs>
-                                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                      </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize:10, fontWeight:800, fill:'#94a3b8'}} dy={15} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{fontSize:10, fontWeight:800, fill:'#94a3b8'}} />
-                                    <Tooltip 
-                                      contentStyle={{borderRadius:'20px', border:'none', boxShadow:'0 20px 25px -5px rgba(0,0,0,0.1)', fontWeight: 'bold'}}
-                                      cursor={{stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '4 4'}}
-                                    />
-                                    <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={4} fillOpacity={1} fill="url(#colorValue)" />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
+              )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                        {/* Conexão Rápida WhatsApp */}
-                        <div className="card-premium p-8 bg-gradient-to-br from-brand-600 to-brand-800 border-none text-white relative overflow-hidden group">
-                           <Zap size={100} className="absolute -bottom-4 -right-4 text-white/10 group-hover:scale-125 transition-transform duration-1000 rotate-12" />
-                           <h4 className="text-sm font-black uppercase tracking-[0.2em] mb-3 opacity-80">Conectividade Zap</h4>
-                           <h3 className="text-2xl font-black mb-6 leading-tight">Mantenha sua IA <br/>sempre em operação.</h3>
-                           <button onClick={() => setActiveTab('whatsapp')} className="bg-white text-brand-700 px-8 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl shadow-black/20 hover:scale-105 active:scale-95 transition-all">
-                             Check Terminal
-                           </button>
-                        </div>
+              {currentProcessId && (
+                <div className="max-w-2xl mx-auto card-premium p-8 text-center animate-fade-in">
+                  <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+                    <RefreshCw size={32} className="animate-spin" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-800 mb-2">Processando PDF...</h3>
+                  <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden mb-2">
+                    <div 
+                      className={`bg-brand-500 h-4 rounded-full transition-all duration-500 ease-out`}
+                      style={{ width: `${processProgress.total > 0 ? (processProgress.processed / processProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-sm font-medium text-slate-600">
+                    {processProgress.processed} de {processProgress.total} empresas consultadas
+                  </p>
+                </div>
+              )}
 
-                        {/* Top Regiões */}
-                        <div className="card-premium p-8 flex flex-col border-none shadow-lg">
-                           <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Frequência por Região</h4>
-                           <div className="space-y-4">
-                              {[
-                                { name: 'Salvador', perc: 45 },
-                                { name: 'Feira de Santana', perc: 22 },
-                                { name: 'Camaçari', perc: 18 },
-                              ].map((reg, idx) => (
-                                <div key={idx} className="space-y-2">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-xs font-black text-slate-700 uppercase tracking-tight">{reg.name}</span>
-                                    <span className="text-[10px] font-black text-slate-500">{reg.perc}%</span>
-                                  </div>
-                                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                                    <div className="h-full bg-brand-500 rounded-full opacity-60" style={{ width: `${reg.perc}%` }}></div>
-                                  </div>
-                                </div>
+              <div className="card-premium p-6">
+                  <h3 className="text-lg font-bold mb-4 text-slate-800">Gerenciador de Arquivos</h3>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-600 font-medium">
+                              <tr>
+                                  <th className="px-4 py-3">Nome do Arquivo</th>
+                                  <th className="px-4 py-3">Data Importação</th>
+                                  <th className="px-4 py-3">Total Registros</th>
+                                  <th className="px-4 py-3">Status</th>
+                                  <th className="px-4 py-3 text-right">Ações</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                              {imports.map(imp => (
+                                  <tr key={imp.id} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 font-medium text-slate-800">{imp.filename}</td>
+                                      <td className="px-4 py-3 text-slate-500">{new Date(imp.date).toLocaleDateString()}</td>
+                                      <td className="px-4 py-3 text-slate-600">{imp.total}</td>
+                                      <td className="px-4 py-3">
+                                          <span className={`text-xs px-2 py-1 rounded-full ${imp.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                              {imp.status === 'completed' ? 'Sucesso' : imp.status}
+                                          </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                          <button onClick={() => deleteImport(imp.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg">
+                                              <Trash2 size={16}/>
+                                          </button>
+                                      </td>
+                                  </tr>
                               ))}
-                           </div>
-                        </div>
-                    </div>
-                </div>
+                          </tbody>
+                      </table>
+                  </div>
               </div>
             </div>
           )}
 
-          {/* TAB: KANBAN FLOW */}
+          {activeTab === 'companies' && (
+            <div className="space-y-6">
+              <FilterBar 
+                filters={filters} 
+                setFilters={setFilters} 
+                availableCities={availableCities} 
+                availableReasons={availableReasons}
+                onRefresh={fetchCompanies}
+              />
+              <CompanyTable 
+                companies={filteredCompanies} 
+                selectedIds={selectedIds} 
+                toggleSelection={toggleSelection} 
+                toggleSelectAll={toggleSelectAll} 
+                selectable={true}
+                onToggleAi={toggleLeadAI}
+              />
+            </div>
+          )}
+
           {activeTab === 'kanban' && (
-            <div className="h-full flex gap-10 overflow-x-auto pb-10 animate-fade-in custom-scrollbar">
-                {['pending', 'sent', 'replied', 'interested'].map((status, idx) => (
-                    <div key={status} className="w-[340px] shrink-0 flex flex-col h-full bg-slate-200/30 rounded-[40px] border border-slate-200/50 p-6 shadow-inner animate-slide-up" style={{ animationDelay: `${idx * 0.1}s` }}>
-                        <div className="flex justify-between items-center mb-8 px-4">
-                            <h3 className="font-black text-slate-700 uppercase text-xs tracking-[0.25em] flex items-center gap-3">
-                                <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${status === 'pending' ? 'bg-slate-400' : status === 'sent' ? 'bg-sky-400' : status === 'replied' ? 'bg-purple-500' : 'bg-emerald-500'}`}></div>
-                                {status === 'pending' ? 'Prospecção' : status === 'sent' ? 'Contatados' : status === 'replied' ? 'Engajamento' : 'Oportunidades'}
-                            </h3>
-                            <span className="bg-white/80 backdrop-blur-md px-3 py-1 rounded-xl text-[10px] font-black text-slate-500 border border-slate-200/50 shadow-sm tabular-nums">
-                                {companies.filter(c => c.campaignStatus === status).length}
-                            </span>
-                        </div>
-                        <div className="flex-1 space-y-6 overflow-y-auto custom-scrollbar pr-1">
-                            {companies.filter(c => c.campaignStatus === status).length === 0 && (
-                                <div className="py-20 text-center text-slate-300 opacity-50 flex flex-col items-center gap-4">
-                                    <Activity size={40} strokeWidth={1}/>
-                                    <p className="text-[10px] font-black uppercase tracking-widest">Sem leads nesta fase</p>
-                                </div>
-                            )}
-                            {companies.filter(c => c.campaignStatus === status).map(lead => (
-                                <div key={lead.id} onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || lead.telefone + '@c.us'); }} className="card-premium p-6 shadow-sm hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] hover:border-brand-300 cursor-pointer transition-all duration-500 bg-white group border-b-[6px] border-b-slate-100/50 hover:border-b-brand-500 ring-1 ring-slate-100">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <Badge variant={lead.situacaoCadastral.includes('ATIVA') ? 'success' : 'danger'}>{lead.situacaoCadastral}</Badge>
-                                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity translate-x-4 group-hover:translate-x-0 duration-300">
-                                            <button className="p-2 bg-brand-50 text-brand-600 rounded-lg hover:bg-brand-500 hover:text-white transition-colors"><MessageCircle size={14}/></button>
-                                        </div>
-                                    </div>
-                                    <h4 className="font-black text-slate-800 text-xs mb-1.5 line-clamp-2 uppercase tracking-tight leading-[1.6] group-hover:text-brand-700 transition-colors">{lead.razaoSocial}</h4>
-                                    <p className="text-[9px] text-slate-400 font-mono mb-6 flex items-center gap-1.5">
-                                      <ShieldCheck size={10} className="text-slate-300" /> {lead.cnpj}
-                                    </p>
-                                    <div className="flex justify-between items-center pt-4 border-t border-slate-50">
-                                        <div className="flex items-center gap-2.5">
-                                            <div className={`w-2 h-2 rounded-full ${lead.aiActive ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-slate-300'}`}></div>
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Agent {lead.aiActive ? 'Active' : 'Standby'}</span>
-                                        </div>
-                                        <div className="p-1.5 bg-slate-50 rounded-lg text-slate-300 group-hover:bg-brand-50 group-hover:text-brand-500 transition-all">
-                                          <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                ))}
+              <div className="h-full">
+                  <div className="flex gap-4 overflow-x-auto pb-4 h-[calc(100vh-140px)]">
+                      <KanbanColumn 
+                        title="Envio Pendente" 
+                        status="pending" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'pending' || c.campaignStatus === 'queued' || !c.campaignStatus)} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Enviados" 
+                        status="sent" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'sent' || c.campaignStatus === 'delivered')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Responderam" 
+                        status="replied" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'replied')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                      <KanbanColumn 
+                        title="Interessados" 
+                        status="interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'interested')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                       <KanbanColumn 
+                        title="Descartados" 
+                        status="not_interested" 
+                        companies={filteredCompanies.filter(c => c.campaignStatus === 'not_interested' || c.campaignStatus === 'skipped' || c.campaignStatus === 'error')} 
+                        onCardClick={setSelectedKanbanLead}
+                      />
+                  </div>
+                  <SelectedLeadModal 
+                    company={selectedKanbanLead} 
+                    onClose={() => setSelectedKanbanLead(null)} 
+                    onGoToChat={goToChat}
+                  />
+              </div>
+          )}
+
+          {activeTab === 'campaigns' && (
+            <div className="space-y-6">
+               {!isCreatingCampaign ? (
+                   <div className="space-y-6">
+                       <div className="flex justify-between items-center">
+                           <h2 className="text-xl font-bold text-slate-700">Minhas Campanhas</h2>
+                           <button onClick={handleOpenNewCampaign} className="btn-primary flex items-center gap-2">
+                               <Plus size={18}/> Nova Campanha
+                           </button>
+                       </div>
+                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                           {campaigns.map(c => (
+                               <div key={c.id} className="card-premium p-6 group relative">
+                                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                       <button onClick={() => deleteCampaign(c.id)} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg">
+                                           <Trash2 size={18}/>
+                                       </button>
+                                   </div>
+                                   <div className="flex justify-between items-start mb-4">
+                                       <div className="p-3 bg-brand-50 text-brand-600 rounded-xl">
+                                           <Rocket size={24}/>
+                                       </div>
+                                       <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full uppercase">Ativa</span>
+                                   </div>
+                                   <h3 className="font-bold text-lg text-slate-800 mb-2">{c.name}</h3>
+                                   <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-4">
+                                       <div><p className="text-xs text-slate-400">Total</p><p className="font-bold">{c.stats?.total || 0}</p></div>
+                                       <div><p className="text-xs text-slate-400">Enviados</p><p className="font-bold text-brand-600">{c.stats?.sent || 0}</p></div>
+                                       <div><p className="text-xs text-slate-400">Respostas</p><p className="font-bold text-emerald-600">{c.stats?.replied || 0}</p></div>
+                                   </div>
+                               </div>
+                           ))}
+                       </div>
+                   </div>
+               ) : (
+                   <div className="max-w-5xl mx-auto">
+                       <div className="mb-8 flex items-center justify-between">
+                           <div><h2 className="text-2xl font-bold text-slate-800">Criar Nova Campanha</h2></div>
+                           <button onClick={() => setIsCreatingCampaign(false)}><X size={24}/></button>
+                       </div>
+                       <div className="card-premium p-8">
+                           {campaignStep === 1 && (
+                               <div className="max-w-xl mx-auto space-y-6">
+                                   <input className="input-premium" placeholder="Nome da Campanha" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} />
+                                   <textarea className="input-premium h-32" placeholder="Descrição" value={newCampaign.description} onChange={e => setNewCampaign({...newCampaign, description: e.target.value})} />
+                                   <button onClick={() => setCampaignStep(2)} className="btn-primary w-full">Próximo</button>
+                               </div>
+                           )}
+                           {campaignStep === 2 && (
+                               <div className="space-y-4">
+                                   <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} onRefresh={fetchCompanies} />
+                                   <div className="h-[400px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
+                                      <CompanyTable companies={filteredCompanies} selectedIds={selectedIds} toggleSelection={toggleSelection} toggleSelectAll={toggleSelectAll} selectable={true} onToggleAi={toggleLeadAI} />
+                                   </div>
+                                   <div className="flex justify-between pt-4">
+                                       <button onClick={() => setCampaignStep(1)} className="btn-secondary">Voltar</button>
+                                       <button onClick={() => setCampaignStep(3)} className="btn-primary" disabled={selectedIds.size === 0}>Próximo ({selectedIds.size})</button>
+                                   </div>
+                               </div>
+                           )}
+                           {campaignStep === 3 && (
+                               <div className="grid grid-cols-2 gap-8">
+                                   <textarea className="input-premium h-64" value={newCampaign.initialMessage} onChange={e => setNewCampaign({...newCampaign, initialMessage: e.target.value})} />
+                                   <textarea className="input-premium h-64" value={newCampaign.aiPersona} onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})} />
+                                   <button onClick={createCampaign} className="btn-primary col-span-2">Disparar</button>
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               )}
             </div>
           )}
 
-          {/* TAB: IMPORT SYSTEM */}
-          {activeTab === 'import' && (
-            <div className="max-w-4xl mx-auto animate-fade-in space-y-12 pb-20">
-                <div className="card-premium p-20 text-center border-2 border-dashed border-slate-200/80 hover:border-brand-500/50 transition-all duration-700 bg-white relative overflow-hidden group shadow-2xl shadow-slate-200/50 rounded-[48px]">
-                    <div className="absolute top-0 right-0 p-16 opacity-[0.03] -rotate-12 group-hover:rotate-0 group-hover:scale-125 transition-transform duration-1000">
-                        <FileSpreadsheet size={300} />
-                    </div>
-                    <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => {
-                         const file = e.target.files?.[0];
-                         if (!file) return;
-                         const fd = new FormData(); fd.append('file', file);
-                         fetch('/start-processing', {method: 'POST', body: fd}).then(() => fetchData());
-                    }} />
-                    <div className="w-28 h-28 bg-brand-50 text-brand-600 rounded-[44px] flex items-center justify-center mx-auto mb-10 shadow-inner group-hover:scale-110 transition-transform duration-500 ring-4 ring-brand-50/50">
-                        <Upload size={44} strokeWidth={2.5} />
-                    </div>
-                    <h2 className="text-4xl font-black text-slate-900 mb-4 tracking-tighter">DATA PIPELINE</h2>
-                    <p className="text-slate-500 text-sm max-w-sm mx-auto font-medium leading-relaxed opacity-70">
-                      Arraste o PDF da consulta consolidada da SEFAZ. Nosso motor irá processar os metadados e atualizar a base inteligente.
-                    </p>
-                </div>
-
-                <div className="card-premium overflow-hidden border-none shadow-2xl rounded-[32px]">
-                    <div className="bg-[#0f172a] px-10 py-6 flex justify-between items-center relative overflow-hidden">
-                        <div className="absolute inset-0 bg-brand-600 opacity-5 pointer-events-none"></div>
-                        <h3 className="font-black text-white text-[10px] uppercase tracking-[0.3em] relative z-10 flex items-center gap-3">
-                           <Activity size={14} className="text-brand-500" /> Extracted Batches
-                        </h3>
-                        <div className="flex items-center gap-4 relative z-10">
-                          <Badge variant="brand">High Volume Ready</Badge>
-                        </div>
-                    </div>
-                    <div className="divide-y divide-slate-100 bg-white">
-                        {imports.length === 0 && (
-                          <div className="p-20 text-center space-y-4">
-                            <Rocket size={40} className="mx-auto text-slate-200" />
-                            <p className="text-sm font-bold text-slate-400 italic">Nenhuma importação pendente.</p>
-                          </div>
-                        )}
-                        {imports.map(imp => (
-                            <div key={imp.id} className="px-10 py-8 flex items-center justify-between hover:bg-slate-50/80 transition-all duration-300 group">
-                                <div className="flex items-center gap-6">
-                                    <div className="w-16 h-16 bg-white rounded-3xl border border-slate-100 flex items-center justify-center text-slate-300 shadow-sm group-hover:text-brand-600 group-hover:border-brand-200 transition-all">
-                                        <FileSpreadsheet size={32} strokeWidth={1.5} />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <p className="font-black text-slate-800 uppercase text-sm tracking-tight group-hover:text-brand-700 transition-colors">{imp.filename}</p>
-                                        <div className="flex items-center gap-4">
-                                            <div className="flex items-center gap-1.5">
-                                              <Activity size={10} className="text-slate-400" />
-                                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{new Date(imp.date).toLocaleDateString()}</span>
-                                            </div>
-                                            <div className="w-1 h-1 rounded-full bg-slate-300"></div>
-                                            <span className="text-[10px] text-brand-500 font-black uppercase tracking-widest">{imp.total} REGISTROS EXTRAÍDOS</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-8">
-                                    <Badge variant={imp.status === 'completed' ? 'success' : 'warning'}>{imp.status.toUpperCase()}</Badge>
-                                    <button onClick={() => deleteImport(imp.id)} className="p-4 text-slate-300 hover:text-rose-500 transition-all rounded-2xl hover:bg-rose-50 shadow-sm active:scale-90">
-                                      <Trash2 size={22}/>
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-          )}
-
-          {/* TAB: LEADS MANAGEMENT */}
-          {activeTab === 'leads' && (
-            <div className="space-y-8 animate-fade-in max-w-[1700px] mx-auto pb-24">
-                <div className="card-premium p-8 flex flex-col xl:flex-row gap-8 items-center justify-between bg-white border-none shadow-xl rounded-[32px]">
-                    <div className="flex-1 relative group w-full">
-                        <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-brand-500 transition-colors duration-300" size={22} />
-                        <input 
-                            type="text" 
-                            className="w-full pl-16 pr-8 py-5 bg-slate-50 border-none rounded-[24px] text-sm font-bold focus:ring-[6px] focus:ring-brand-500/10 transition-all placeholder:text-slate-300 shadow-inner"
-                            placeholder="Consultar por Razão Social, CNPJ ou Inscrição..."
-                            value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    <div className="flex items-center gap-4 w-full xl:w-auto overflow-x-auto pb-4 xl:pb-0 custom-scrollbar">
-                         <div className="relative">
-                            <select className="appearance-none bg-slate-50 border-none rounded-2xl pl-6 pr-12 py-4 text-[11px] font-black uppercase text-slate-600 focus:ring-4 focus:ring-brand-500/10 cursor-pointer shadow-sm min-w-[180px]"
-                              value={filters.city} onChange={e => setFilters({...filters, city: e.target.value})}>
-                                <option value="Todos">Município</option>
-                                {uniqueFilters.municipios.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
-                            <ChevronRight size={14} className="absolute right-5 top-1/2 -translate-y-1/2 rotate-90 text-slate-400 pointer-events-none" />
-                         </div>
-
-                         <div className="relative">
-                            <select className="appearance-none bg-slate-50 border-none rounded-2xl pl-6 pr-12 py-4 text-[11px] font-black uppercase text-slate-600 focus:ring-4 focus:ring-brand-500/10 cursor-pointer shadow-sm min-w-[180px]"
-                              value={filters.waStatus} onChange={e => setFilters({...filters, waStatus: e.target.value})}>
-                                <option value="Todos">Status Funil</option>
-                                <option value="pending">Pendente</option>
-                                <option value="sent">Enviado</option>
-                                <option value="replied">Respondeu</option>
-                                <option value="interested">Oportunidade</option>
-                            </select>
-                            <ChevronRight size={14} className="absolute right-5 top-1/2 -translate-y-1/2 rotate-90 text-slate-400 pointer-events-none" />
-                         </div>
-
-                         <button onClick={() => setSelectedIds(new Set(filteredCompanies.map(c => c.id)))} className="px-8 py-4 bg-brand-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-lg shadow-brand-500/30 hover:bg-brand-700 hover:-translate-y-0.5 transition-all whitespace-nowrap active:scale-95">
-                           Global Select
-                         </button>
-                    </div>
-                </div>
-
-                <div className="card-premium overflow-hidden border-none shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] rounded-[32px]">
-                    <div className="overflow-x-auto custom-scrollbar">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-slate-50/80 border-b border-slate-100/50">
-                                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">Entidade / Fiscal</th>
-                                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">Estágio Funil</th>
-                                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">Motivo SEFAZ</th>
-                                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.25em] text-center">Protocolo IA</th>
-                                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.25em] text-right">Interação</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50 bg-white">
-                                {filteredCompanies.length === 0 && (
-                                    <tr><td colSpan={5} className="p-32 text-center">
-                                      <div className="flex flex-col items-center gap-6 opacity-30">
-                                        <Search size={64} />
-                                        <p className="font-black uppercase tracking-widest text-sm italic">Query sem resultados na base atual.</p>
-                                      </div>
-                                    </td></tr>
-                                )}
-                                {filteredCompanies.map(lead => (
-                                    <tr key={lead.id} className="group hover:bg-brand-50/30 transition-all duration-300 cursor-default">
-                                        <td className="px-10 py-6">
-                                            <div className="flex items-center gap-6">
-                                                <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center font-black text-slate-400 group-hover:bg-brand-600 group-hover:text-white group-hover:scale-105 group-hover:rotate-3 transition-all duration-300 shadow-sm border border-slate-200/50">
-                                                    {lead.razaoSocial.charAt(0)}
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="font-black text-slate-800 text-xs uppercase tracking-tight leading-none group-hover:text-brand-800 transition-colors truncate max-w-[300px]">{lead.razaoSocial}</p>
-                                                    <div className="flex items-center gap-2.5 mt-2">
-                                                        <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-50 px-1.5 rounded tracking-tighter">{lead.cnpj}</span>
-                                                        <Badge variant={lead.situacaoCadastral.includes('ATIVA') ? 'success' : 'danger'}>{lead.situacaoCadastral}</Badge>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-10 py-6"><StatusBadge status={lead.campaignStatus} /></td>
-                                        <td className="px-10 py-6 max-w-[350px]">
-                                            <p className="text-[11px] text-slate-500 font-medium italic line-clamp-2 leading-relaxed opacity-70 group-hover:opacity-100 transition-opacity">
-                                              "{cleanReasonText(lead.motivoSituacao) || 'Não especificado'}"
-                                            </p>
-                                        </td>
-                                        <td className="px-10 py-6 text-center">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                              <button 
-                                                  onClick={() => toggleLeadAI(lead.id, !!lead.aiActive)}
-                                                  className={`relative inline-flex h-6 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-all duration-500 focus:outline-none shadow-sm ${lead.aiActive ? 'bg-emerald-500' : 'bg-slate-200'}`}
-                                              >
-                                                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xl ring-0 transition-transform duration-500 ease-spring ${lead.aiActive ? 'translate-x-6' : 'translate-x-0'}`} />
-                                              </button>
-                                              <span className={`text-[8px] font-black uppercase tracking-widest ${lead.aiActive ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                                {lead.aiActive ? 'Active' : 'Standby'}
-                                              </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-10 py-6 text-right">
-                                            <button 
-                                              onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || lead.telefone + '@c.us'); }} 
-                                              className="p-4 bg-brand-50 text-brand-600 rounded-2xl hover:bg-brand-600 hover:text-white transition-all duration-300 shadow-sm active:scale-90"
-                                            >
-                                                <MessageCircle size={20} strokeWidth={2.5} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-          )}
-
-          {/* TAB: WHATSAPP AGENT */}
+          {/* --- WHATSAPP TAB --- */}
           {activeTab === 'whatsapp' && (
-            <div className="flex h-full gap-10 animate-fade-in max-w-[1800px] mx-auto pb-6">
+            <div className="flex h-full gap-6">
+              {/* Sidebar List */}
+              <div className="w-1/3 card-premium flex flex-col overflow-hidden bg-white">
+                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                   <div className="flex items-center gap-2">
+                       <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                           <User size={20} />
+                       </div>
+                       <h3 className="font-bold text-slate-700">Conversas</h3>
+                   </div>
+                   <div className="flex gap-2">
+                        <div className={`w-3 h-3 rounded-full ${waSession.status === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'}`} title={waSession.status}></div>
+                   </div>
+                </div>
                 
-                {/* Conversations Sidebar */}
-                <div className="w-[480px] card-premium flex flex-col bg-white overflow-hidden border-none shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] rounded-[40px]">
-                    <div className="p-8 border-b border-slate-50 bg-slate-50/40 flex justify-between items-center">
-                        <div>
-                          <h3 className="font-black text-slate-800 text-sm uppercase tracking-tighter">Live Conversation Pool</h3>
-                          <p className="text-[10px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Sincronizado com Baileys Core</p>
+                {waSession.status !== 'connected' && waSession.qrCode ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50/50">
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-4">
+                            <img src={waSession.qrCode} alt="QR Code" className="w-48 h-48 mix-blend-multiply" />
                         </div>
-                        <Badge variant="brand">{chats.length}</Badge>
+                        <p className="text-sm font-medium text-slate-600 animate-pulse flex items-center gap-2">
+                            <Phone size={16}/> Escaneie para conectar
+                        </p>
                     </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50/80">
-                        {chats.length === 0 && (
-                          <div className="p-20 text-center opacity-30 space-y-4">
-                            <RefreshCw size={48} className="mx-auto animate-spin" />
-                            <p className="text-xs font-black uppercase tracking-widest">Aguardando Handshake...</p>
-                          </div>
-                        )}
+                ) : (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
                         {chats.map(chat => (
                             <div 
                                 key={chat.id} 
-                                onClick={() => setActiveChat(chat.id)}
-                                className={`p-8 flex gap-6 hover:bg-brand-50/20 cursor-pointer transition-all duration-300 relative group ${activeChat === chat.id ? 'bg-brand-50/50 border-r-[6px] border-brand-600' : ''}`}
+                                onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} 
+                                className={`p-4 border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors flex gap-3 ${activeChat === chat.id ? 'bg-slate-100' : ''}`}
                             >
-                                <div className="w-16 h-16 rounded-[24px] bg-slate-100 flex items-center justify-center font-black text-slate-400 shrink-0 text-2xl border-2 border-white shadow-md group-hover:scale-110 transition-transform duration-500">
-                                    {chat.name?.charAt(0) || 'U'}
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-brand-100 to-brand-200 flex-shrink-0 flex items-center justify-center text-brand-600 font-bold text-sm">
+                                    {getInitials(chat.name || 'Unknown')}
                                 </div>
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex justify-between items-baseline mb-2">
-                                        <p className="font-black text-slate-800 text-xs uppercase tracking-tight truncate pr-6 group-hover:text-brand-700 transition-colors">{chat.name || chat.id.split('@')[0]}</p>
-                                        <span className="text-[10px] font-mono font-bold text-slate-400 whitespace-nowrap">{chat.timestamp ? formatTime(chat.timestamp) : ''}</span>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-baseline mb-1">
+                                        <h4 className="font-semibold text-slate-800 text-sm truncate">{chat.name || chat.id.split('@')[0]}</h4>
+                                        <span className="text-[10px] text-slate-400 font-medium">{formatTime(chat.timestamp)}</span>
                                     </div>
-                                    <p className="text-[11px] text-slate-500 truncate leading-relaxed font-medium opacity-80">{chat.lastMessage || 'Sem conteúdo de prévia'}</p>
+                                    <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
                                 </div>
                                 {chat.unreadCount > 0 && (
-                                  <div className="absolute right-8 bottom-8 w-6 h-6 bg-brand-600 rounded-xl flex items-center justify-center text-white text-[10px] font-black shadow-lg shadow-brand-500/40">
-                                    {chat.unreadCount}
-                                  </div>
+                                    <div className="flex flex-col justify-center">
+                                        <span className="bg-emerald-500 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                                            {chat.unreadCount}
+                                        </span>
+                                    </div>
                                 )}
                             </div>
                         ))}
                     </div>
-                </div>
+                )}
+              </div>
 
-                {/* Chat Engine Window */}
-                <div className="flex-1 card-premium flex flex-col bg-[#f0f2f5] overflow-hidden relative border-none shadow-[0_32px_64px_-16px_rgba(0,0,0,0.12)] rounded-[40px]">
-                    <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://web.whatsapp.com/img/bg-chat-tile-dark_a4be512e71a7b327317d924731d7986c.png')] bg-repeat"></div>
-                    
-                    {activeChat ? (
-                        <>
-                            {/* Chat Header */}
-                            <div className="p-8 bg-white/95 backdrop-blur-3xl border-b border-slate-200/60 flex justify-between items-center z-10 shadow-sm">
-                                <div className="flex items-center gap-6">
-                                    <div className="w-14 h-14 rounded-3xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-brand-500/20 ring-2 ring-white/50">
-                                        {chats.find(c => c.id === activeChat)?.name?.charAt(0) || activeChat.charAt(0)}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <h3 className="font-black text-slate-900 text-sm uppercase tracking-tight truncate max-w-[300px]">{chats.find(c => c.id === activeChat)?.name || activeChat}</h3>
-                                        <div className="flex items-center gap-2 mt-1">
-                                            <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
-                                            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest opacity-80">Syncing Pipeline</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <button className="p-4 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-[20px] transition-all active:scale-90"><Phone size={24}/></button>
-                                    <button className="p-4 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-[20px] transition-all active:scale-90"><MoreVertical size={24}/></button>
-                                </div>
-                            </div>
+              {/* Chat Window */}
+              <div className="flex-1 card-premium flex flex-col overflow-hidden bg-[#efeae2] relative">
+                {/* Background Pattern Overlay (Optional) */}
+                <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: '400px' }}></div>
 
-                            {/* Messages Scroll Area */}
-                            <div className="flex-1 overflow-y-auto p-10 space-y-8 custom-scrollbar z-0 flex flex-col">
-                                {chatMessages.length === 0 && (
-                                  <div className="my-auto text-center space-y-4 opacity-20">
-                                    <Terminal size={64} className="mx-auto" />
-                                    <p className="text-sm font-black uppercase tracking-widest">Handshaking chat history...</p>
-                                  </div>
+                {activeChat ? (
+                  <>
+                     {/* Header */}
+                     <div className="p-3 border-b border-slate-200/60 flex justify-between items-center bg-white/95 backdrop-blur-sm shadow-sm z-10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 cursor-pointer">
+                                {activeChatCompany ? (
+                                    <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold">
+                                        {activeChatCompany.razaoSocial.substring(0,2)}
+                                    </div>
+                                ) : (
+                                    <User size={20} />
                                 )}
-                                {chatMessages.map(msg => (
-                                    <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                                        <div className={`max-w-[80%] px-8 py-5 rounded-[32px] text-sm shadow-xl relative transition-all hover:scale-[1.01] ${
-                                          msg.fromMe 
-                                          ? 'bg-gradient-to-br from-brand-600 to-brand-700 text-white rounded-tr-none ring-1 ring-white/20' 
-                                          : 'bg-white text-slate-800 rounded-tl-none border border-slate-200/50'
-                                        }`}>
-                                            <p className="leading-relaxed font-semibold text-[13px]">{msg.body}</p>
-                                            <div className={`flex items-center justify-end gap-2 mt-3 ${msg.fromMe ? 'text-brand-100' : 'text-slate-400'}`}>
-                                                <span className="text-[10px] font-mono font-bold opacity-60">{new Date(msg.timestamp*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                                                {msg.fromMe && <Check size={14} className="opacity-80" strokeWidth={3}/>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
+                            <div className="flex flex-col">
+                                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                    {chats.find(c => c.id === activeChat)?.name || activeChat.replace('@c.us', '').replace('@lid', '')}
+                                    {activeChatCompany && <span className="text-[10px] bg-brand-100 text-brand-700 px-1.5 rounded border border-brand-200">Cliente</span>}
+                                </h3>
+                                {/* Mostra o telefone real ou info extra se disponível, senão esconde o ID técnico feio */}
+                                {activeChatCompany ? (
+                                    <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeChatCompany.razaoSocial}</p>
+                                ) : (
+                                    <p className="text-[10px] text-slate-400">online</p>
+                                )}
+                            </div>
+                        </div>
 
-                            {/* Input Container */}
-                            <div className="p-8 bg-white/95 backdrop-blur-3xl border-t border-slate-200/60 flex items-center gap-6 z-10 shadow-inner">
-                                <div className="flex gap-1">
-                                    <button className="p-4 text-slate-400 hover:text-brand-500 transition-colors hover:bg-slate-50 rounded-2xl"><Smile size={28}/></button>
-                                    <button className="p-4 text-slate-400 hover:text-brand-500 transition-colors hover:bg-slate-50 rounded-2xl"><PaperclipIcon size={26}/></button>
-                                </div>
-                                <div className="flex-1 relative">
-                                    <input 
-                                        className="w-full bg-slate-100/80 border-none rounded-[28px] px-10 py-5 text-sm font-bold focus:ring-[6px] focus:ring-brand-500/10 transition-all shadow-inner text-slate-800"
-                                        placeholder="Type your instruction or message..."
-                                        value={newMessage}
-                                        onChange={e => setNewMessage(e.target.value)}
-                                        onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
-                                    />
-                                </div>
-                                <button onClick={handleSendMessage} className="p-6 bg-gradient-to-br from-brand-500 to-brand-700 text-white rounded-[32px] shadow-[0_20px_40px_rgba(59,130,246,0.3)] hover:scale-105 active:scale-95 transition-all duration-300 ring-1 ring-white/20">
-                                    <Send size={28} className="translate-x-0.5" />
+                        <div className="flex items-center gap-3">
+                            {/* AI Toggle */}
+                            {activeChatCompany && (
+                                <button 
+                                    onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)}
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-xs font-bold ${
+                                        activeChatCompany.aiActive 
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 shadow-sm' 
+                                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {activeChatCompany.aiActive ? <Bot size={16} /> : <Power size={16} />}
+                                    {activeChatCompany.aiActive ? "IA Auto" : "IA Off"}
+                                </button>
+                            )}
+
+                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
+
+                            {/* Actions Menu */}
+                            <div className="flex items-center gap-1">
+                                <button 
+                                    title="Marcar como Interessado"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'interested');
+                                    }} 
+                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors"
+                                >
+                                    <CheckCircle2 size={20} />
+                                </button>
+                                <button 
+                                    title="Descartar"
+                                    onClick={() => {
+                                        const comp = companies.find(c => activeChat.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+                                        if(comp) updateLeadStatus(comp.id, 'not_interested');
+                                    }} 
+                                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
+                                <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
+                                    <MoreVertical size={20} />
                                 </button>
                             </div>
-                        </>
-                    ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-12 text-center animate-fade-in relative">
-                            <div className="absolute inset-0 bg-gradient-to-b from-slate-100/50 to-transparent"></div>
-                            <div className="w-32 h-32 bg-white rounded-[44px] shadow-[0_24px_48px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-200 mb-10 border border-slate-50 relative z-10">
-                                <MessageCircle size={64} className="opacity-20" />
-                            </div>
-                            <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter relative z-10">Agent Command Center</h2>
-                            <p className="text-xs max-w-sm mt-4 font-black uppercase tracking-[0.25em] text-slate-400 relative z-10 opacity-70">Selecione um pool para gerir</p>
-                            <div className="mt-12 flex gap-4 relative z-10">
-                              <Badge variant="brand">Automated Replies Enabled</Badge>
-                              <Badge variant="success">Sync Active</Badge>
-                            </div>
                         </div>
-                    )}
-                </div>
-            </div>
-          )}
+                     </div>
 
-          {/* TAB: KNOWLEDGE BASE */}
-          {activeTab === 'knowledge' && (
-            <div className="max-w-[1500px] mx-auto space-y-12 pb-32 animate-fade-in">
-                <div className="flex items-center justify-between bg-white p-12 rounded-[56px] shadow-xl border border-slate-50 relative overflow-hidden group">
-                    <div className="absolute inset-0 bg-gradient-to-r from-brand-500/5 to-transparent pointer-events-none"></div>
-                    <div className="relative z-10">
-                        <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter mb-2 leading-none">Kernel Inteligente</h2>
-                        <p className="text-slate-400 font-black uppercase text-[11px] tracking-[0.3em] opacity-80">Base de Heurística Jurídica e Respostas</p>
-                    </div>
-                    <button 
-                        onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })}
-                        className="btn-primary py-5 px-12 shadow-[0_20px_40px_rgba(59,130,246,0.3)] text-xs font-black uppercase tracking-[0.2em] flex items-center gap-4 group-hover:scale-105 transition-all duration-500"
-                    >
-                        <Plus size={24} strokeWidth={3} /> Inject New Rule
-                    </button>
-                </div>
+                     {/* Messages Area */}
+                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar z-0">
+                        {chatMessages.map(msg => (
+                           <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} group`}>
+                              <div className={`relative max-w-[75%] px-3 py-2 text-sm shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] ${
+                                  msg.fromMe 
+                                  ? 'bg-[#d9fdd3] text-slate-900 rounded-lg rounded-tr-none' 
+                                  : 'bg-white text-slate-900 rounded-lg rounded-tl-none'
+                              }`}>
+                                 {/* Triangle tail */}
+                                 <div className={`absolute top-0 w-0 h-0 border-[6px] border-transparent ${
+                                     msg.fromMe 
+                                     ? '-right-[6px] border-t-[#d9fdd3]' 
+                                     : '-left-[6px] border-t-white'
+                                 }`}></div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-10">
-                    {aiConfig.knowledgeRules.map((rule, idx) => (
-                        <div key={rule.id} className="card-premium p-10 group flex flex-col h-[520px] border-none shadow-xl hover:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.12)] hover:-translate-y-2 transition-all duration-700 overflow-hidden relative animate-slide-up" style={{ animationDelay: `${idx * 0.1}s` }}>
-                            <div className="absolute top-0 right-0 p-12 opacity-[0.03] -rotate-12 group-hover:rotate-0 group-hover:scale-125 transition-transform duration-1000">
-                              <BookOpen size={200} />
-                            </div>
-                            <div className="flex justify-between items-start mb-8 relative z-10">
-                                <div className="p-4 bg-brand-50 text-brand-600 rounded-3xl group-hover:bg-brand-600 group-hover:text-white transition-all duration-500 shadow-sm ring-1 ring-brand-100">
-                                    <BookOpen size={28} />
-                                </div>
-                                <div className="flex gap-2">
-                                    <button onClick={() => setEditingRule(rule)} className="p-3 text-slate-300 hover:text-brand-500 hover:bg-slate-50 rounded-2xl transition-all active:scale-90"><Edit size={22}/></button>
-                                    <button onClick={() => {
-                                        const nr = aiConfig.knowledgeRules.filter(r => r.id !== rule.id);
-                                        saveAiConfig({...aiConfig, knowledgeRules: nr});
-                                    }} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all active:scale-90"><Trash2 size={22}/></button>
-                                </div>
-                            </div>
-                            <h4 className="font-black text-slate-800 text-lg mb-4 uppercase leading-tight line-clamp-3 h-20 group-hover:text-brand-800 transition-colors relative z-10">{rule.motivoSituacao}</h4>
-                            <div className="mt-6 space-y-5 flex-1 overflow-y-auto custom-scrollbar pr-3 z-10">
-                                {rule.instructions.length === 0 && (
-                                  <p className="text-[11px] text-slate-400 font-bold italic">Sem diretrizes injetadas para este kernel.</p>
-                                )}
-                                {rule.instructions.map((inst, i) => (
-                                    <div key={i} className="p-5 bg-slate-50/80 rounded-3xl border border-slate-100 group-hover:bg-white transition-colors duration-500 shadow-sm">
-                                        <p className="text-[12px] text-slate-600 font-semibold italic leading-relaxed tracking-tight">"{inst.content}"</p>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between relative z-10">
-                               <Badge variant={rule.isActive ? 'success' : 'default'}>{rule.isActive ? 'RULE ENABLED' : 'RULE STANDBY'}</Badge>
-                               <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{rule.instructions.length} DATA NODES</span>
-                            </div>
+                                 {msg.hasMedia && (
+                                     <div className="mb-1 p-2 bg-black/5 rounded flex items-center justify-center text-slate-500 text-xs gap-1">
+                                         <PaperclipIcon size={12}/> Mídia Oculta
+                                     </div>
+                                 )}
+                                 
+                                 <p className="whitespace-pre-wrap leading-relaxed pr-16 pb-2">{msg.body}</p>
+                                 
+                                 <div className="absolute bottom-1 right-2 flex items-center gap-1">
+                                     <span className="text-[10px] text-slate-500/80">
+                                         {formatTime(msg.timestamp)}
+                                     </span>
+                                     {msg.fromMe && <Check size={12} className="text-emerald-500" />}
+                                 </div>
+                              </div>
+                           </div>
+                        ))}
+                     </div>
+
+                     {/* Input Area */}
+                     <div className="p-3 bg-[#f0f2f5] border-t border-slate-200 flex items-end gap-2 z-10">
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <Smile size={24} />
+                        </button>
+                        <button className="p-2 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                            <PaperclipIcon size={22} />
+                        </button>
+                        
+                        <div className="flex-1 bg-white rounded-xl border border-white focus-within:border-slate-300 transition-all px-4 py-2 mb-1 shadow-sm flex items-center">
+                            <input 
+                                type="text" 
+                                className="flex-1 bg-transparent outline-none text-slate-800 placeholder-slate-400"
+                                value={newMessage} 
+                                onChange={e => setNewMessage(e.target.value)} 
+                                onKeyDown={e => e.key === 'Enter' && sendMessage()} 
+                                placeholder="Digite uma mensagem..." 
+                            />
                         </div>
-                    ))}
-                </div>
 
-                {editingRule && (
-                    <div className="fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-2xl flex items-center justify-center p-8">
-                        <div className="bg-white w-full max-w-3xl rounded-[56px] shadow-2xl flex flex-col max-h-[90vh] animate-slide-up ring-1 ring-white/20">
-                            <div className="p-12 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                                <h3 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Heuristic Editor</h3>
-                                <button onClick={() => setEditingRule(null)} className="p-4 hover:bg-white hover:text-rose-500 rounded-[28px] text-slate-400 transition-all shadow-sm active:scale-90"><X size={32}/></button>
-                            </div>
-                            <div className="p-12 overflow-y-auto custom-scrollbar space-y-12 flex-1 bg-white">
-                                <div className="space-y-4">
-                                    <label className="block text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-3 ml-2">Kernel Identification (SEFAZ ID)</label>
-                                    <input className="input-premium font-black text-slate-900 py-5 rounded-[24px] tracking-tight uppercase shadow-inner" placeholder="Ex: Art. 27 - Inaptidão por MEI" value={editingRule.motivoSituacao} onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})} />
-                                </div>
-                                <div className="space-y-6">
-                                    <div className="flex justify-between items-center mb-6 ml-2">
-                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">IA Behavioral Directives</label>
-                                        <button onClick={() => setEditingRule({...editingRule, instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]})} className="px-5 py-2 bg-brand-50 text-brand-700 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-brand-600 hover:text-white transition-all shadow-sm">+ Append Directive</button>
-                                    </div>
-                                    <div className="space-y-6">
-                                        {editingRule.instructions.length === 0 && (
-                                          <div className="p-12 text-center border-2 border-dashed border-slate-100 rounded-[32px] text-slate-300 font-bold uppercase tracking-widest text-[10px]">Aguardando dados...</div>
-                                        )}
-                                        {editingRule.instructions.map((inst, i) => (
-                                            <div key={i} className="flex gap-5 items-start animate-fade-in group/edit">
-                                                <div className="flex-1 relative">
-                                                   <textarea className="input-premium flex-1 min-h-[120px] text-sm font-semibold leading-relaxed p-6 rounded-[32px] shadow-sm focus:ring-brand-500/20" value={inst.content} onChange={e => {
-                                                        const ni = [...editingRule.instructions]; ni[i].content = e.target.value; setEditingRule({...editingRule, instructions: ni});
-                                                    }} placeholder="The AI agent should communicate that..." />
-                                                </div>
-                                                <button onClick={() => {
-                                                    const ni = editingRule.instructions.filter((_, idx) => idx !== i); setEditingRule({...editingRule, instructions: ni});
-                                                }} className="p-4 text-rose-200 hover:text-rose-500 hover:bg-rose-50 mt-4 transition-all rounded-2xl active:scale-90"><Trash2 size={24}/></button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="p-12 bg-slate-50 border-t border-slate-100 flex gap-6 rounded-b-[56px]">
-                                <button onClick={() => setEditingRule(null)} className="flex-1 py-5 font-black text-xs uppercase text-slate-400 tracking-widest hover:text-slate-600 transition-colors">Abort Changes</button>
-                                <button onClick={() => {
-                                     const nr = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id); nr.push(editingRule);
-                                     saveAiConfig({...aiConfig, knowledgeRules: nr}); setEditingRule(null);
-                                }} className="flex-[2] btn-primary py-5 uppercase font-black text-sm tracking-[0.3em] shadow-2xl shadow-brand-500/30 rounded-[28px]">Commit Rule to Kernel</button>
-                            </div>
-                        </div>
-                    </div>
+                        {newMessage.trim() ? (
+                            <button onClick={sendMessage} className="p-3 mb-1 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition-all shadow-md active:scale-95">
+                                <Send size={20} className="ml-0.5" />
+                            </button>
+                        ) : (
+                            <button className="p-3 mb-1 text-slate-500 hover:bg-slate-200/50 rounded-full transition-colors">
+                                <Mic size={24} />
+                            </button>
+                        )}
+                     </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-[#f0f2f5] border-b-[6px] border-brand-500/20">
+                      <div className="w-64 h-64 opacity-10 bg-contain bg-no-repeat bg-center mb-4" style={{ backgroundImage: 'url("https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg")' }}></div>
+                      <h2 className="text-2xl font-light text-slate-600 mb-2">WhatsApp CRM</h2>
+                      <p className="text-sm text-slate-500 max-w-sm text-center">Selecione uma conversa para iniciar o atendimento ou visualizar o histórico.</p>
+                      <div className="mt-8 text-xs text-slate-400 flex items-center gap-1">
+                          <Bot size={12}/> IA Ativa e pronta para vender
+                      </div>
+                  </div>
                 )}
+              </div>
             </div>
           )}
 
-          {/* TAB: SYSTEM SETTINGS */}
-          {activeTab === 'settings' && (
-            <div className="max-w-4xl mx-auto space-y-12 animate-fade-in pb-32">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                    {/* Provedor Card */}
-                    <div className="card-premium p-12 space-y-10 bg-white border-none shadow-2xl rounded-[48px]">
-                        <div className="flex items-center gap-5">
-                          <div className="p-4 bg-brand-50 text-brand-600 rounded-[24px] shadow-sm"><Cpu size={32} /></div>
-                          <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tighter">AI Provider</h3>
-                        </div>
-                        <div className="grid grid-cols-2 gap-6">
-                            <button onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-3-flash-preview'})} className={`p-8 rounded-[36px] border-2 flex flex-col items-center gap-5 transition-all duration-500 group ${aiConfig.provider === 'gemini' ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-xl shadow-brand-500/10' : 'border-slate-50 bg-slate-50/50 text-slate-400 hover:border-slate-200'}`}>
-                                <Bot size={44} className={`transition-transform duration-500 ${aiConfig.provider === 'gemini' ? 'scale-110' : 'group-hover:scale-110'}`} />
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Google Gemini</span>
-                            </button>
-                            <button onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})} className={`p-8 rounded-[36px] border-2 flex flex-col items-center gap-5 transition-all duration-500 group ${aiConfig.provider === 'groq' ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-xl shadow-brand-500/10' : 'border-slate-50 bg-slate-50/50 text-slate-400 hover:border-slate-200'}`}>
-                                <Rocket size={44} className={`transition-transform duration-500 ${aiConfig.provider === 'groq' ? 'scale-110' : 'group-hover:scale-110'}`} />
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Groq Llama</span>
-                            </button>
-                        </div>
-                        <div className="p-8 bg-slate-50/80 rounded-[32px] border border-slate-100/50">
-                          <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.15em] leading-relaxed">
-                            O CRM VIRGULA utiliza chaves de API injetadas automaticamente via environment. A segurança de ponta a ponta é garantida pelo protocolo de handshake do servidor.
-                          </p>
-                        </div>
-                    </div>
+           {activeTab === 'knowledge' && (
+              <div className="max-w-4xl mx-auto space-y-6">
+                 <div className="flex justify-between items-center">
+                     <div>
+                        <h2 className="text-2xl font-bold text-slate-800">Base de Conhecimento</h2>
+                        <p className="text-slate-500">Vincule motivos da SEFAZ a instruções para a IA</p>
+                     </div>
+                     <button onClick={() => setEditingRule({ id: uuidv4(), motivoSituacao: '', instructions: [], isActive: true })} className="btn-primary">
+                         <Plus size={18} /> Nova Regra
+                     </button>
+                 </div>
 
-                    {/* Persona Card */}
-                    <div className="card-premium p-12 space-y-10 bg-white border-none shadow-2xl rounded-[48px]">
-                        <div className="flex items-center gap-5">
-                          <div className="p-4 bg-emerald-50 text-emerald-600 rounded-[24px] shadow-sm"><User size={32} /></div>
-                          <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tighter">AI Persona</h3>
-                        </div>
-                        <div className="space-y-6">
-                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-4 ml-2">System Instruction (Master Directive)</label>
-                            <textarea className="input-premium h-64 text-sm font-semibold leading-relaxed p-8 rounded-[36px] shadow-inner focus:ring-emerald-500/20" value={aiConfig.persona} onChange={e => setAiConfig({...aiConfig, persona: e.target.value})} />
-                            <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase px-2">
-                              <span>Professional</span>
-                              <span>Contextual</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                 {editingRule ? (
+                     <div className="card-premium p-8 animate-fade-in">
+                         <h3 className="text-lg font-bold mb-6">Editor de Regra</h3>
+                         <div className="space-y-4">
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Exato ou Parcial)</label>
+                                 <div className="relative">
+                                     <input 
+                                        list="reasons-list"
+                                        className="input-premium" 
+                                        placeholder="Selecione ou digite um motivo..."
+                                        value={editingRule.motivoSituacao}
+                                        onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})}
+                                     />
+                                     <datalist id="reasons-list">
+                                        {availableReasons.map((r: string, idx: number) => (
+                                            <option key={idx} value={r} />
+                                        ))}
+                                     </datalist>
+                                 </div>
+                                 <p className="text-xs text-slate-400 mt-1">O sistema buscará este texto no motivo da situação cadastral da empresa.</p>
+                             </div>
+                             
+                             <div>
+                                 <label className="block text-sm font-medium text-slate-700 mb-2">Instruções para a IA</label>
+                                 {editingRule.instructions.map((inst, idx) => (
+                                     <div key={idx} className="flex gap-2 mb-2">
+                                         <input 
+                                            className="input-premium flex-1" 
+                                            value={inst.content} 
+                                            onChange={e => {
+                                                const newInsts = [...editingRule.instructions];
+                                                newInsts[idx].content = e.target.value;
+                                                setEditingRule({...editingRule, instructions: newInsts});
+                                            }}
+                                            placeholder="Instrução detalhada..."
+                                         />
+                                         <button onClick={() => {
+                                             const newInsts = editingRule.instructions.filter((_, i) => i !== idx);
+                                             setEditingRule({...editingRule, instructions: newInsts});
+                                         }} className="p-3 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                     </div>
+                                 ))}
+                                 <button onClick={() => {
+                                     setEditingRule({
+                                         ...editingRule, 
+                                         instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]
+                                     });
+                                 }} className="text-brand-600 text-sm font-semibold hover:underline">+ Adicionar Instrução</button>
+                             </div>
 
-                <div className="card-premium p-12 bg-gradient-to-br from-rose-600 to-rose-800 border-none text-white flex flex-col md:flex-row items-center justify-between shadow-2xl rounded-[48px] group relative overflow-hidden">
-                    <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-                    <div className="flex items-center gap-8 relative z-10 text-center md:text-left">
-                        <div className="p-6 bg-white/20 rounded-[36px] shadow-xl backdrop-blur-md group-hover:scale-110 transition-transform duration-500"><AlertCircle size={44} strokeWidth={2.5} /></div>
-                        <div>
-                            <h4 className="text-3xl font-black uppercase tracking-tighter">Danger Zone</h4>
-                            <p className="text-rose-100/80 text-xs font-bold mt-1 uppercase tracking-widest">Ações Irreversíveis de Sistema</p>
-                        </div>
-                    </div>
-                    <button onClick={() => { if(confirm("Confirmar limpeza completa?")) fetch('/api/cleanup', {method:'POST'}).then(fetchData); }} className="mt-8 md:mt-0 bg-white text-rose-700 px-12 py-5 rounded-[28px] font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:bg-rose-50 hover:scale-105 active:scale-95 transition-all relative z-10">
-                      Purge Orphan Data
-                    </button>
-                </div>
+                             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                                 <button onClick={() => setEditingRule(null)} className="btn-secondary">Cancelar</button>
+                                 <button onClick={() => {
+                                     if(!editingRule.motivoSituacao) return alert("Preencha o motivo");
+                                     const newRules = aiConfig.knowledgeRules.filter(r => r.id !== editingRule.id);
+                                     newRules.push(editingRule);
+                                     saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                     setEditingRule(null);
+                                 }} className="btn-primary">Salvar Regra</button>
+                             </div>
+                         </div>
+                     </div>
+                 ) : (
+                     <div className="grid gap-4">
+                         {aiConfig.knowledgeRules.map(rule => (
+                             <div key={rule.id} className="card-premium p-6 flex justify-between items-start">
+                                 <div>
+                                     <h4 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                                         <BookOpen size={18} className="text-brand-500"/>
+                                         {rule.motivoSituacao}
+                                     </h4>
+                                     <ul className="mt-2 space-y-1">
+                                         {rule.instructions.map((inst, i) => (
+                                             <li key={i} className="text-sm text-slate-600 list-disc list-inside">{inst.content}</li>
+                                         ))}
+                                     </ul>
+                                 </div>
+                                 <div className="flex gap-2">
+                                     <button onClick={() => setEditingRule(rule)} className="p-2 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit size={18}/></button>
+                                     <button onClick={() => {
+                                         if(confirm("Excluir regra?")) {
+                                             const newRules = aiConfig.knowledgeRules.filter(r => r.id !== rule.id);
+                                             saveAiConfig({...aiConfig, knowledgeRules: newRules});
+                                         }
+                                     }} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                                 </div>
+                             </div>
+                         ))}
+                         {aiConfig.knowledgeRules.length === 0 && (
+                             <div className="text-center p-12 text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                                 Nenhuma regra cadastrada. Adicione regras para ensinar a IA a lidar com situações específicas.
+                             </div>
+                         )}
+                     </div>
+                 )}
+              </div>
+           )}
 
-                <div className="flex justify-end pt-8">
-                    <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary py-6 px-20 uppercase font-black text-sm tracking-[0.4em] shadow-[0_32px_64px_-12px_rgba(37,99,235,0.4)] rounded-[32px] hover:scale-[1.03] active:scale-95 transition-all duration-500">
-                      Commit All Changes
-                    </button>
-                </div>
-            </div>
-          )}
+           {activeTab === 'settings' && (
+               <div className="max-w-3xl mx-auto space-y-6">
+                   <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
+                   
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-6 flex items-center gap-2"><Cpu size={20}/> Provedor de IA e Chaves de API</h3>
+                       
+                       <div className="space-y-6">
+                           <div className="grid grid-cols-2 gap-4 mb-4">
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'gemini', model: 'gemini-3-flash-preview'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'gemini' 
+                                       ? 'bg-brand-50 border-brand-500 ring-2 ring-brand-500/20 text-brand-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">G</div>
+                                   <span className="font-bold">Google Gemini</span>
+                               </button>
 
-        </main>
-      </div>
+                               <button 
+                                   onClick={() => setAiConfig({...aiConfig, provider: 'groq', model: 'llama-3.1-8b-instant'})}
+                                   className={`p-4 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                       aiConfig.provider === 'groq' 
+                                       ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/20 text-orange-700' 
+                                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                   }`}
+                               >
+                                   <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold">Q</div>
+                                   <span className="font-bold">Groq (Llama 3)</span>
+                               </button>
+                           </div>
+
+                           {aiConfig.provider === 'gemini' && (
+                               <ApiKeyInput 
+                                   label="Google Gemini" 
+                                   provider="gemini"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.gemini}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+
+                           {aiConfig.provider === 'groq' && (
+                               <ApiKeyInput 
+                                   label="Groq Cloud" 
+                                   provider="groq"
+                                   activeProvider={aiConfig.provider}
+                                   currentKey={aiConfig.apiKeys?.groq}
+                                   onChange={(prov: string, val: string) => setAiConfig({
+                                       ...aiConfig, 
+                                       apiKeys: { ...aiConfig.apiKeys, [prov]: val }
+                                   })}
+                               />
+                           )}
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Bot size={20}/> Comportamento da IA</h3>
+                       <div className="space-y-4">
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Modelo de IA</label>
+                               <input 
+                                  className="input-premium"
+                                  value={aiConfig.model}
+                                  onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
+                                  placeholder={aiConfig.provider === 'gemini' ? "gemini-3-flash-preview" : "llama-3.1-8b-instant"}
+                               />
+                           </div>
+
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Persona do Sistema</label>
+                               <textarea 
+                                  className="input-premium h-32"
+                                  value={aiConfig.persona}
+                                  onChange={e => setAiConfig({...aiConfig, persona: e.target.value})}
+                                  placeholder="Defina quem é a IA (Ex: Você é um consultor tributário...)"
+                               />
+                               <p className="text-xs text-slate-400 mt-1">Instrução 'System' enviada em todas as mensagens.</p>
+                           </div>
+                           
+                           <div>
+                               <label className="block text-sm font-medium text-slate-700 mb-1">Criatividade (Temperatura): {aiConfig.temperature}</label>
+                               <input 
+                                  type="range" min="0" max="1" step="0.1" 
+                                  className="w-full"
+                                  value={aiConfig.temperature}
+                                  onChange={e => setAiConfig({...aiConfig, temperature: parseFloat(e.target.value)})}
+                               />
+                               <div className="flex justify-between text-xs text-slate-400">
+                                   <span>Preciso (0.0)</span>
+                                   <span>Criativo (1.0)</span>
+                               </div>
+                           </div>
+
+                           <div>
+                               <label className="flex items-center gap-2 cursor-pointer">
+                                   <input 
+                                      type="checkbox" 
+                                      checked={aiConfig.aiActive}
+                                      onChange={e => setAiConfig({...aiConfig, aiActive: e.target.checked})}
+                                      className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500"
+                                   />
+                                   <span className="text-sm font-medium text-slate-700">IA Ativa para Respostas Automáticas</span>
+                               </label>
+                           </div>
+                       </div>
+                   </div>
+
+                   <div className="card-premium p-8 border-rose-100 bg-rose-50/20">
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-700"><AlertCircle size={20}/> Zona de Perigo</h3>
+                       <div className="flex justify-between items-center">
+                           <div>
+                               <h4 className="font-bold text-slate-700">Limpeza de Dados Fantasmas</h4>
+                               <p className="text-sm text-slate-500">Remove empresas que ficaram no banco de dados após uma importação interrompida ou falha.</p>
+                           </div>
+                           <button onClick={cleanupOrphanedData} className="btn-danger flex items-center gap-2">
+                               <Trash2 size={18}/> Limpar Dados
+                           </button>
+                       </div>
+                   </div>
+
+                   <div className="flex justify-end">
+                       <button 
+                           onClick={() => saveAiConfig(aiConfig)} 
+                           disabled={isSavingConfig}
+                           className="btn-primary flex items-center gap-2"
+                       >
+                           {isSavingConfig ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18}/>}
+                           {isSavingConfig ? 'Salvando...' : 'Salvar Alterações'}
+                       </button>
+                   </div>
+               </div>
+           )}
+
+        </div>
+      </main>
     </div>
   );
 };
 
 export default App;
+
