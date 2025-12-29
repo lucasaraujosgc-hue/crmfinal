@@ -87,24 +87,30 @@ db.serialize(() => {
     FOREIGN KEY(consulta_id) REFERENCES consulta(id),
     FOREIGN KEY(campaign_id) REFERENCES campaign(id)
   )`);
-  
-  // Nova tabela de Logs
-  db.run(`CREATE TABLE IF NOT EXISTS system_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT,
-    type TEXT, -- 'info', 'error', 'ai_success', 'ai_skip', 'msg_in', 'msg_out'
-    source TEXT,
-    message TEXT,
-    meta TEXT
-  )`);
 });
 
-// Helper de Log
+// --- SISTEMA DE LOGS EM MEMÓRIA (RAM) ---
+// Mantém os logs apenas enquanto o servidor roda, sem tocar no SQLite.
+const memoryLogs = [];
+
 function logSystem(type, source, message, meta = {}) {
     const timestamp = new Date().toISOString();
     console.log(`[${type.toUpperCase()}] ${message}`);
-    db.run(`INSERT INTO system_logs (timestamp, type, source, message, meta) VALUES (?, ?, ?, ?, ?)`,
-        [timestamp, type, source, message, JSON.stringify(meta)]);
+    
+    // Adiciona ao início do array (mais recente primeiro)
+    memoryLogs.unshift({
+        id: uuidv4(),
+        timestamp,
+        type,
+        source,
+        message,
+        meta: JSON.stringify(meta)
+    });
+
+    // Mantém apenas os últimos 200 logs na memória para não pesar
+    if (memoryLogs.length > 200) {
+        memoryLogs.pop();
+    }
 }
 
 let aiConfig = {
@@ -163,13 +169,13 @@ client.on('ready', () => {
 
 // --- LÓGICA DE MENSAGENS E ASSOCIAÇÃO PROFUNDA ---
 client.on('message', async (msg) => {
-    if (msg.fromMe) return; // Ignora logs de mensagens próprias para não poluir, ou logar como 'msg_out' se quiser deep debug
+    if (msg.fromMe) return;
 
     const waId = msg.from;
     logSystem('msg_in', 'whatsapp', `Mensagem recebida de ${waId}`, { body: msg.body });
 
     if (waId.includes('status@broadcast') || waId.includes('@g.us')) {
-        return; // Ignora grupos e status silenciosamente
+        return; 
     }
 
     if (!aiConfig.aiActive) {
@@ -215,7 +221,7 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // Atualiza wa_id
+            // Atualiza wa_id se necessário
             if (company.wa_id !== waId) {
                 db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [waId, company.id]);
             }
@@ -295,7 +301,7 @@ ${ruleContext}
                 }
                 
                 if (finalText && finalText.length > 2) {
-                    // Delay humano
+                    // Delay humano para naturalidade
                     setTimeout(async () => {
                         await client.sendMessage(msg.from, finalText);
                         logSystem('ai_success', 'whatsapp', `Resposta enviada para ${company.razao_social}`, { resposta: finalText });
@@ -352,10 +358,8 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // API Endpoints
 app.get('/api/logs', (req, res) => {
-    db.all('SELECT * FROM system_logs ORDER BY id DESC LIMIT 100', (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
+    // Retorna os logs da memória RAM
+    res.json(memoryLogs);
 });
 
 app.get('/api/config', (req, res) => res.json(aiConfig));
