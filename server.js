@@ -151,13 +151,29 @@ let qrCodeData = null;
 let clientReady = false;
 
 client.on('qr', (qr) => {
-    QRCode.toDataURL(qr, (err, url) => qrCodeData = url);
-    logSystem('info', 'whatsapp', 'Novo QR Code gerado');
+    // Generate QR Code Data URL
+    QRCode.toDataURL(qr, (err, url) => {
+        if (err) {
+            logSystem('error', 'whatsapp', 'Erro ao gerar imagem do QR Code', { error: err.message });
+            return;
+        }
+        qrCodeData = url;
+        logSystem('info', 'whatsapp', 'Novo QR Code gerado e disponível para leitura');
+    });
 });
 
 client.on('ready', () => { 
     clientReady = true; 
+    qrCodeData = null; // Clear QR code on success
     logSystem('info', 'whatsapp', 'Cliente WhatsApp conectado e pronto'); 
+});
+
+client.on('disconnected', (reason) => {
+    clientReady = false;
+    qrCodeData = null;
+    logSystem('warning', 'whatsapp', 'Cliente WhatsApp desconectado', { reason });
+    // Reinitialize client to allow reconnection
+    client.initialize().catch(err => logSystem('error', 'whatsapp', 'Erro ao reiniciar cliente após desconexão', { error: err.message }));
 });
 
 // --- LÓGICA DE MENSAGENS E ASSOCIAÇÃO PROFUNDA ---
@@ -311,7 +327,7 @@ ${ruleContext}
     );
 });
 
-client.initialize().catch(() => {});
+client.initialize().catch(err => logSystem('error', 'whatsapp', 'Erro na inicialização do cliente', { error: err.message }));
 
 // Lógica de Envio de Campanhas
 function startCampaignSending(campaignId, message) {
@@ -465,7 +481,12 @@ app.post('/api/whatsapp/send', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/whatsapp/status', (req, res) => res.json({ status: clientReady ? 'connected' : 'disconnected', qr: qrCodeData }));
+app.get('/api/whatsapp/status', (req, res) => {
+    res.json({ 
+        status: clientReady ? 'connected' : 'disconnected', 
+        qr: qrCodeData 
+    });
+});
 
 app.post('/api/cleanup', (req, res) => {
     db.run(`DELETE FROM resultado WHERE consulta_id NOT IN (SELECT id FROM consulta)`, (err) => {

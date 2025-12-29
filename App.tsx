@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
@@ -311,7 +310,9 @@ const App: React.FC = () => {
   const [newCampaign, setNewCampaign] = useState({
      name: '',
      description: '',
-     initialMessage: 'Olá, tudo bem? Identifiquei que sua empresa possui pendências junto à SEFAZ. Sou contador e presto serviços de regularização fiscal, e posso te ajudar a analisar e resolver essa situação, caso tenha interesse.',
+     initialMessage: 'Olá, tudo bem?
+
+Identifiquei que sua empresa possui pendências junto à SEFAZ. Sou contador e presto serviços de regularização fiscal, e posso te ajudar a analisar e resolver essa situação, caso tenha interesse.',
      aiPersona: DEFAULT_AI_PERSONA
   });
 
