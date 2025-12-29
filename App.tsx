@@ -1,14 +1,19 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
-  User, X, Rocket, Trello, Edit,
-  MoreVertical, Smile, Check, Cpu, Terminal,
-  Zap, Activity,
-  Database, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode
+  User, X, Save, Rocket, Trello, Edit, Power, Phone,
+  MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu, Terminal,
+  ChevronRight, Globe, ShieldCheck, Zap, Activity, BarChart3, PieChart as PieChartIcon,
+  Database, Filter, ArrowLeft, ArrowRight, Play, Clock, ScrollText
 } from 'lucide-react';
-import { CompanyResult, Status, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
-import { DEFAULT_AI_PERSONA } from './constants';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  Cell, AreaChart, Area
+} from 'recharts';
+import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
+import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Custom Hooks ---
@@ -68,12 +73,7 @@ const getInitials = (name: string) => {
 
 // --- Subcomponentes Visuais ---
 
-interface BadgeProps {
-  children: React.ReactNode;
-  variant?: string;
-}
-
-const Badge: React.FC<BadgeProps> = ({ children, variant = 'default' }) => {
+const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, variant?: string }) => {
   const styles: Record<string, string> = {
     default: 'bg-slate-100 text-slate-600 border-slate-200',
     success: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
@@ -236,12 +236,7 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
 );
 
 // Card Kanban Compacto
-interface KanbanCardProps {
-    company: CompanyResult;
-    onClick: () => void;
-}
-
-const KanbanCard: React.FC<KanbanCardProps> = ({ company, onClick }) => (
+const KanbanCard = ({ company, onClick }: { company: CompanyResult, onClick: () => void }) => (
     <div onClick={onClick} className="bg-white p-4 rounded-[16px] shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-200 cursor-pointer border border-slate-100 group relative overflow-hidden mb-3">
         <div className="absolute top-0 right-0 w-12 h-12 bg-gradient-to-br from-slate-50 to-slate-100 rounded-bl-[24px] -mr-3 -mt-3 transition-all group-hover:scale-125"></div>
         
@@ -291,6 +286,9 @@ const App: React.FC = () => {
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
 
+  // Import Process State
+  const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
+
   // Filters State
   const [filters, setFilters] = useState({
     search: '',
@@ -313,7 +311,9 @@ const App: React.FC = () => {
   const [newCampaign, setNewCampaign] = useState({
      name: '',
      description: '',
-     initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar na regularização.',
+     initialMessage: 'Olá, tudo bem?
+
+Identifiquei que sua empresa possui pendências junto à SEFAZ. Sou contador e presto serviços de regularização fiscal, e posso te ajudar a analisar e resolver essa situação, caso tenha interesse.',
      aiPersona: DEFAULT_AI_PERSONA
   });
 
@@ -672,7 +672,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* LOGS TAB */}
+          {/* LOGS TAB - NEW */}
           {activeTab === 'logs' && (
              <div className="max-w-[1400px] mx-auto animate-fade-in pb-20 space-y-6">
                  <div className="flex items-center justify-between">
@@ -715,7 +715,7 @@ const App: React.FC = () => {
              </div>
           )}
 
-          {/* CAMPAIGNS - WIZARD */}
+          {/* CAMPAIGNS - WIZARD RESTORED & COMPACTED */}
           {activeTab === 'campaigns' && (
              <div className="max-w-[1600px] mx-auto animate-fade-in pb-32">
                  {!isCreatingCampaign ? (
@@ -906,7 +906,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* KNOWLEDGE TAB */}
+          {/* KNOWLEDGE TAB (Compactada) */}
           {activeTab === 'knowledge' && (
             <div className="max-w-[1400px] mx-auto space-y-8 pb-32 animate-fade-in">
                 <div className="flex items-center justify-between bg-white p-8 rounded-[40px] shadow-lg border border-slate-50 relative overflow-hidden group">
@@ -1027,30 +1027,8 @@ const App: React.FC = () => {
                                 <span className="text-[9px] font-black uppercase tracking-[0.2em]">Groq Llama</span>
                             </button>
                         </div>
-
-                        {/* API KEYS INPUT */}
-                        <div className="mt-6 space-y-3 animate-fade-in border-t border-slate-100 pt-6">
-                            <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                                API Key ({aiConfig.provider === 'gemini' ? 'Google AI Studio' : 'Groq Cloud'})
-                            </label>
-                            <div className="relative">
-                                <input
-                                    type="password"
-                                    className="input-premium font-mono text-xs pr-10"
-                                    placeholder={aiConfig.provider === 'gemini' ? "Cole sua chave AIza..." : "Cole sua chave gsk_..."}
-                                    value={aiConfig.provider === 'gemini' ? aiConfig.apiKeys?.gemini || '' : aiConfig.apiKeys?.groq || ''}
-                                    onChange={e => {
-                                        const k = { ...aiConfig.apiKeys, [aiConfig.provider]: e.target.value };
-                                        setAiConfig({ ...aiConfig, apiKeys: k });
-                                    }}
-                                />
-                                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
-                                    {aiConfig.provider === 'gemini' ? <Zap size={14} /> : <Rocket size={14} />}
-                                </div>
-                            </div>
-                            <p className="text-[9px] text-slate-400 ml-1">
-                                A chave é salva localmente e enviada ao servidor apenas para configuração da sessão.
-                            </p>
+                        <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100/50">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] leading-relaxed">As chaves de API são gerenciadas via ambiente de servidor para máxima segurança de ponta a ponta.</p>
                         </div>
                     </div>
 
@@ -1083,53 +1061,14 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end pt-4">
-                    <button 
-                        onClick={() => saveAiConfig(aiConfig)} 
-                        disabled={isSavingConfig}
-                        className="btn-primary py-4 px-12 uppercase font-black text-xs tracking-[0.4em] shadow-[0_20px_40px_-12px_rgba(37,99,235,0.4)] rounded-2xl hover:scale-[1.03] active:scale-95 transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed">
-                        {isSavingConfig ? 'Salvando...' : 'Salvar Todas Alterações'}
-                    </button>
+                    <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary py-4 px-12 uppercase font-black text-xs tracking-[0.4em] shadow-[0_20px_40px_-12px_rgba(37,99,235,0.4)] rounded-2xl hover:scale-[1.03] active:scale-95 transition-all duration-300">Salvar Todas Alterações</button>
                 </div>
             </div>
           )}
 
-          {/* WHATSAPP TAB */}
+          {/* OTHER TABS (WA) - Same as before (Compactado) */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6 animate-fade-in max-w-[1800px] mx-auto">
-                {waSession.status !== 'connected' ? (
-                   // QR CODE DISPLAY IF NOT CONNECTED
-                   <div className="w-full flex flex-col items-center justify-center space-y-8 animate-slide-up">
-                      <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center relative overflow-hidden max-w-lg w-full">
-                          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-emerald-600"></div>
-                          <h2 className="text-3xl font-black text-slate-800 mb-2 uppercase tracking-tight">Conectar WhatsApp</h2>
-                          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Abra o App &gt; Configurações &gt; Aparelhos Conectados</p>
-                          
-                          <div className="relative inline-block p-4 bg-white rounded-3xl shadow-inner border border-slate-100 mx-auto">
-                              {waSession.qrCode ? (
-                                  <img src={waSession.qrCode} alt="QR Code" className="w-64 h-64 mix-blend-multiply opacity-90" />
-                              ) : (
-                                  <div className="w-64 h-64 bg-slate-50 rounded-2xl flex flex-col items-center justify-center animate-pulse gap-4">
-                                      <QrCode size={48} className="text-slate-300" />
-                                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Gerando Sessão...</span>
-                                  </div>
-                              )}
-                              
-                              {waSession.qrCode && (
-                                <div className="absolute inset-0 border-[4px] border-emerald-500/20 rounded-3xl pointer-events-none"></div>
-                              )}
-                          </div>
-
-                          <div className="mt-8 flex justify-center gap-2">
-                              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl text-slate-500 text-[10px] font-bold uppercase tracking-wider">
-                                  <div className={`w-2 h-2 rounded-full ${waSession.status === 'connecting' ? 'bg-amber-400 animate-bounce' : 'bg-slate-300'}`}></div>
-                                  Status: {waSession.status.toUpperCase()}
-                              </div>
-                          </div>
-                      </div>
-                   </div>
-                ) : (
-                // EXISTING CHAT UI IF CONNECTED
-                <>
                 {/* Conversations Sidebar */}
                 <div className="w-[400px] card-premium flex flex-col bg-white overflow-hidden border-none shadow-[0_20px_40px_-16px_rgba(0,0,0,0.1)] rounded-[32px]">
                     <div className="p-6 border-b border-slate-50 bg-slate-50/40 flex justify-between items-center">
@@ -1230,8 +1169,6 @@ const App: React.FC = () => {
                         </div>
                     )}
                 </div>
-                </>
-                )}
             </div>
           )}
 
