@@ -2,17 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
-  User, X, Save, Rocket, Trello, Edit, Power, Phone,
-  MoreVertical, Smile, Paperclip as PaperclipIcon, Check, Eye, EyeOff, Cpu, Terminal,
-  ChevronRight, Globe, ShieldCheck, Zap, Activity, BarChart3, PieChart as PieChartIcon,
-  Database, Filter, ArrowLeft, ArrowRight, Play, Clock, ScrollText
+  User, X, Rocket, Trello, Edit,
+  MoreVertical, Smile, Check, Cpu, Terminal,
+  Zap, Activity,
+  Database, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Cell, AreaChart, Area
-} from 'recharts';
-import { CompanyResult, Status, CampaignStatus, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch, Instruction } from './types';
-import { DEFAULT_KNOWLEDGE_RULES, DEFAULT_AI_PERSONA } from './constants';
+import { CompanyResult, Status, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
+import { DEFAULT_AI_PERSONA } from './constants';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Custom Hooks ---
@@ -72,7 +68,12 @@ const getInitials = (name: string) => {
 
 // --- Subcomponentes Visuais ---
 
-const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, variant?: string }) => {
+interface BadgeProps {
+  children: React.ReactNode;
+  variant?: string;
+}
+
+const Badge: React.FC<BadgeProps> = ({ children, variant = 'default' }) => {
   const styles: Record<string, string> = {
     default: 'bg-slate-100 text-slate-600 border-slate-200',
     success: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
@@ -235,7 +236,12 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
 );
 
 // Card Kanban Compacto
-const KanbanCard = ({ company, onClick }: { company: CompanyResult, onClick: () => void }) => (
+interface KanbanCardProps {
+    company: CompanyResult;
+    onClick: () => void;
+}
+
+const KanbanCard: React.FC<KanbanCardProps> = ({ company, onClick }) => (
     <div onClick={onClick} className="bg-white p-4 rounded-[16px] shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-200 cursor-pointer border border-slate-100 group relative overflow-hidden mb-3">
         <div className="absolute top-0 right-0 w-12 h-12 bg-gradient-to-br from-slate-50 to-slate-100 rounded-bl-[24px] -mr-3 -mt-3 transition-all group-hover:scale-125"></div>
         
@@ -285,9 +291,6 @@ const App: React.FC = () => {
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
 
-  // Import Process State
-  const [currentProcessId, setCurrentProcessId] = useState<string | null>(null);
-
   // Filters State
   const [filters, setFilters] = useState({
     search: '',
@@ -310,7 +313,7 @@ const App: React.FC = () => {
   const [newCampaign, setNewCampaign] = useState({
      name: '',
      description: '',
-     initialMessage: 'Olá, tudo bem? Identifiquei que sua empresa possui pendências junto à SEFAZ. Sou contador e presto serviços de regularização fiscal, e posso te ajudar a analisar e resolver essa situação, caso tenha interesse.',
+     initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar na regularização.',
      aiPersona: DEFAULT_AI_PERSONA
   });
 
@@ -669,7 +672,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* LOGS TAB - NEW */}
+          {/* LOGS TAB */}
           {activeTab === 'logs' && (
              <div className="max-w-[1400px] mx-auto animate-fade-in pb-20 space-y-6">
                  <div className="flex items-center justify-between">
@@ -712,7 +715,7 @@ const App: React.FC = () => {
              </div>
           )}
 
-          {/* CAMPAIGNS - WIZARD RESTORED & COMPACTED */}
+          {/* CAMPAIGNS - WIZARD */}
           {activeTab === 'campaigns' && (
              <div className="max-w-[1600px] mx-auto animate-fade-in pb-32">
                  {!isCreatingCampaign ? (
@@ -903,7 +906,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* KNOWLEDGE TAB (Compactada) */}
+          {/* KNOWLEDGE TAB */}
           {activeTab === 'knowledge' && (
             <div className="max-w-[1400px] mx-auto space-y-8 pb-32 animate-fade-in">
                 <div className="flex items-center justify-between bg-white p-8 rounded-[40px] shadow-lg border border-slate-50 relative overflow-hidden group">
@@ -1024,8 +1027,30 @@ const App: React.FC = () => {
                                 <span className="text-[9px] font-black uppercase tracking-[0.2em]">Groq Llama</span>
                             </button>
                         </div>
-                        <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100/50">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] leading-relaxed">As chaves de API são gerenciadas via ambiente de servidor para máxima segurança de ponta a ponta.</p>
+
+                        {/* API KEYS INPUT */}
+                        <div className="mt-6 space-y-3 animate-fade-in border-t border-slate-100 pt-6">
+                            <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                API Key ({aiConfig.provider === 'gemini' ? 'Google AI Studio' : 'Groq Cloud'})
+                            </label>
+                            <div className="relative">
+                                <input
+                                    type="password"
+                                    className="input-premium font-mono text-xs pr-10"
+                                    placeholder={aiConfig.provider === 'gemini' ? "Cole sua chave AIza..." : "Cole sua chave gsk_..."}
+                                    value={aiConfig.provider === 'gemini' ? aiConfig.apiKeys?.gemini || '' : aiConfig.apiKeys?.groq || ''}
+                                    onChange={e => {
+                                        const k = { ...aiConfig.apiKeys, [aiConfig.provider]: e.target.value };
+                                        setAiConfig({ ...aiConfig, apiKeys: k });
+                                    }}
+                                />
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+                                    {aiConfig.provider === 'gemini' ? <Zap size={14} /> : <Rocket size={14} />}
+                                </div>
+                            </div>
+                            <p className="text-[9px] text-slate-400 ml-1">
+                                A chave é salva localmente e enviada ao servidor apenas para configuração da sessão.
+                            </p>
                         </div>
                     </div>
 
@@ -1058,132 +1083,157 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end pt-4">
-                    <button onClick={() => saveAiConfig(aiConfig)} className="btn-primary py-4 px-12 uppercase font-black text-xs tracking-[0.4em] shadow-[0_20px_40px_-12px_rgba(37,99,235,0.4)] rounded-2xl hover:scale-[1.03] active:scale-95 transition-all duration-300">Salvar Todas Alterações</button>
+                    <button 
+                        onClick={() => saveAiConfig(aiConfig)} 
+                        disabled={isSavingConfig}
+                        className="btn-primary py-4 px-12 uppercase font-black text-xs tracking-[0.4em] shadow-[0_20px_40px_-12px_rgba(37,99,235,0.4)] rounded-2xl hover:scale-[1.03] active:scale-95 transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed">
+                        {isSavingConfig ? 'Salvando...' : 'Salvar Todas Alterações'}
+                    </button>
                 </div>
             </div>
           )}
 
-          {/* OTHER TABS (WA) - Same as before (Compactado) */}
+          {/* WHATSAPP TAB */}
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6 animate-fade-in max-w-[1800px] mx-auto">
+                {waSession.status !== 'connected' ? (
+                   // QR CODE DISPLAY IF NOT CONNECTED
+                   <div className="w-full flex flex-col items-center justify-center space-y-8 animate-slide-up">
+                      <div className="bg-white p-12 rounded-[40px] shadow-2xl border border-slate-100 text-center relative overflow-hidden max-w-lg w-full">
+                          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-emerald-400 to-emerald-600"></div>
+                          <h2 className="text-3xl font-black text-slate-800 mb-2 uppercase tracking-tight">Conectar WhatsApp</h2>
+                          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Abra o App &gt; Configurações &gt; Aparelhos Conectados</p>
+                          
+                          <div className="relative inline-block p-4 bg-white rounded-3xl shadow-inner border border-slate-100 mx-auto">
+                              {waSession.qrCode ? (
+                                  <img src={waSession.qrCode} alt="QR Code" className="w-64 h-64 mix-blend-multiply opacity-90" />
+                              ) : (
+                                  <div className="w-64 h-64 bg-slate-50 rounded-2xl flex flex-col items-center justify-center animate-pulse gap-4">
+                                      <QrCode size={48} className="text-slate-300" />
+                                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Gerando Sessão...</span>
+                                  </div>
+                              )}
+                              
+                              {waSession.qrCode && (
+                                <div className="absolute inset-0 border-[4px] border-emerald-500/20 rounded-3xl pointer-events-none"></div>
+                              )}
+                          </div>
 
-              {/* ===================== */}
-              {/* TELA DE CONEXÃO (QR) */}
-              {/* ===================== */}
-              {waSession?.status === 'disconnected' && waSession?.qrCode && (
-                <div className="flex flex-1 items-center justify-center">
-                  <div className="card-premium p-10 flex flex-col items-center gap-6">
-                    <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">
-                      Conectar WhatsApp
-                    </h2>
-
-                    <img
-                      src={waSession.qrCode}
-                      alt="QR Code WhatsApp"
-                      className="w-64 h-64 rounded-2xl border border-slate-200 shadow-md"
-                    />
-
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 text-center max-w-xs">
-                      Abra o WhatsApp no celular<br />
-                      Dispositivos Conectados → Conectar
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* ===================== */}
-              {/* CHAT (CONECTADO) */}
-              {/* ===================== */}
-              {waSession?.status === 'connected' && (
+                          <div className="mt-8 flex justify-center gap-2">
+                              <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 rounded-xl text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                                  <div className={`w-2 h-2 rounded-full ${waSession.status === 'connecting' ? 'bg-amber-400 animate-bounce' : 'bg-slate-300'}`}></div>
+                                  Status: {waSession.status.toUpperCase()}
+                              </div>
+                          </div>
+                      </div>
+                   </div>
+                ) : (
+                // EXISTING CHAT UI IF CONNECTED
                 <>
-                  {/* Conversations Sidebar */}
-                  <div className="w-[400px] card-premium flex flex-col bg-white overflow-hidden border-none shadow-[0_20px_40px_-16px_rgba(0,0,0,0.1)] rounded-[32px]">
+                {/* Conversations Sidebar */}
+                <div className="w-[400px] card-premium flex flex-col bg-white overflow-hidden border-none shadow-[0_20px_40px_-16px_rgba(0,0,0,0.1)] rounded-[32px]">
                     <div className="p-6 border-b border-slate-50 bg-slate-50/40 flex justify-between items-center">
-                      <div>
-                        <h3 className="font-black text-slate-800 text-xs uppercase tracking-tighter">
-                          Conversas Ativas
-                        </h3>
-                        <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">
-                          Live Feed
-                        </p>
-                      </div>
-                      <Badge variant="brand">{chats.length}</Badge>
+                        <div>
+                          <h3 className="font-black text-slate-800 text-xs uppercase tracking-tighter">Conversas Ativas</h3>
+                          <p className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-widest">Live Feed</p>
+                        </div>
+                        <Badge variant="brand">{chats.length}</Badge>
                     </div>
-
                     <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-50/80">
-                      {chats.map(chat => (
-                        <div
-                          key={chat.id}
-                          onClick={() => {
-                            setActiveChat(chat.id)
-                            fetchMessages(chat.id)
-                          }}
-                          className={`p-6 flex gap-4 hover:bg-brand-50/20 cursor-pointer transition-all duration-200 relative group ${
-                            activeChat === chat.id
-                              ? 'bg-brand-50/50 border-r-[4px] border-brand-600'
-                              : ''
-                          }`}
-                        >
-                          <div className="w-12 h-12 rounded-[18px] bg-slate-100 flex items-center justify-center font-black text-slate-400 shrink-0 text-lg border-2 border-white shadow-md group-hover:scale-110 transition-transform">
-                            {getInitials(chat.name || '??')}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex justify-between items-baseline mb-1">
-                              <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight truncate pr-4 group-hover:text-brand-700 transition-colors">
-                                {chat.name || chat.id.replace(/\D/g, '')}
-                              </p>
-                              <span className="text-[9px] font-mono font-bold text-slate-400 whitespace-nowrap">
-                                {chat.timestamp ? formatTime(chat.timestamp) : ''}
-                              </span>
+                        {chats.map(chat => (
+                            <div key={chat.id} onClick={() => { setActiveChat(chat.id); fetchMessages(chat.id); }} className={`p-6 flex gap-4 hover:bg-brand-50/20 cursor-pointer transition-all duration-200 relative group ${activeChat === chat.id ? 'bg-brand-50/50 border-r-[4px] border-brand-600' : ''}`}>
+                                <div className="w-12 h-12 rounded-[18px] bg-slate-100 flex items-center justify-center font-black text-slate-400 shrink-0 text-lg border-2 border-white shadow-md group-hover:scale-110 transition-transform">
+                                    {getInitials(chat.name || '??')}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex justify-between items-baseline mb-1">
+                                        <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight truncate pr-4 group-hover:text-brand-700 transition-colors">{chat.name || chat.id.replace(/\D/g, '')}</p>
+                                        <span className="text-[9px] font-mono font-bold text-slate-400 whitespace-nowrap">{chat.timestamp ? formatTime(chat.timestamp) : ''}</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-500 truncate leading-relaxed font-medium opacity-80">{chat.lastMessage}</p>
+                                </div>
+                                {chat.unreadCount > 0 && <div className="absolute right-6 bottom-6 w-5 h-5 bg-brand-600 rounded-lg flex items-center justify-center text-white text-[9px] font-black shadow-lg shadow-brand-500/40">{chat.unreadCount}</div>}
                             </div>
-
-                            <p className="text-[10px] text-slate-500 truncate leading-relaxed font-medium opacity-80">
-                              {chat.lastMessage}
-                            </p>
-                          </div>
-
-                          {chat.unreadCount > 0 && (
-                            <div className="absolute right-6 bottom-6 w-5 h-5 bg-brand-600 rounded-lg flex items-center justify-center text-white text-[9px] font-black shadow-lg shadow-brand-500/40">
-                              {chat.unreadCount}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        ))}
                     </div>
-                  </div>
+                </div>
 
-                  {/* Chat Window */}
-                  <div className="flex-1 card-premium flex flex-col bg-[#f0f2f5] overflow-hidden relative border-none shadow-[0_20px_40px_-16px_rgba(0,0,0,0.12)] rounded-[32px]">
+                {/* Chat Window */}
+                <div className="flex-1 card-premium flex flex-col bg-[#f0f2f5] overflow-hidden relative border-none shadow-[0_20px_40px_-16px_rgba(0,0,0,0.12)] rounded-[32px]">
                     <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://web.whatsapp.com/img/bg-chat-tile-dark_a4be512e71a7b327317d924731d7986c.png')]"></div>
-
+                    
                     {activeChat ? (
-                      <>
-                        {/* HEADER */}
-                        {/* MESSAGES */}
-                        {/* INPUT */}
-                      </>
+                        <>
+                            <div className="p-6 bg-white/95 backdrop-blur-3xl border-b border-slate-200/60 flex justify-between items-center z-10">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center font-black text-white text-lg shadow-lg">
+                                        {getInitials(chats.find(c => c.id === activeChat)?.name || '??')}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <h3 className="font-black text-slate-900 text-xs uppercase tracking-tight truncate max-w-[300px]">{chats.find(c => c.id === activeChat)?.name || activeChat.replace(/\D/g, '')}</h3>
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
+                                            <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest opacity-80">
+                                                {activeChatCompany ? activeChatCompany.razaoSocial?.substring(0, 30) + '...' : 'Live Chat'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {activeChatCompany && (
+                                        <button onClick={() => toggleLeadAI(activeChatCompany.id, activeChatCompany.aiActive)} className={`p-3 rounded-2xl transition-all flex items-center gap-2 ${activeChatCompany.aiActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-400'}`}>
+                                            <Bot size={16} />
+                                            <span className="text-[9px] font-black uppercase">IA {activeChatCompany.aiActive ? 'Auto' : 'Off'}</span>
+                                        </button>
+                                    )}
+                                    <button className="p-3 text-slate-400 hover:text-brand-600 hover:bg-slate-50 rounded-2xl transition-all"><MoreVertical size={20}/></button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar z-0 flex flex-col">
+                                {chatMessages.map(msg => (
+                                    <div key={msg.id} className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+                                        <div className={`max-w-[80%] px-6 py-3 rounded-[24px] text-xs shadow-md relative transition-all ${msg.fromMe ? 'bg-gradient-to-br from-brand-600 to-brand-700 text-white rounded-tr-none shadow-brand-500/20' : 'bg-white text-slate-800 rounded-tl-none border border-slate-200/50'}`}>
+                                            <p className="leading-relaxed font-semibold pr-6">{msg.body}</p>
+                                            <div className={`flex items-center justify-end gap-1 mt-1 ${msg.fromMe ? 'text-brand-100' : 'text-slate-400'}`}>
+                                                <span className="text-[8px] font-mono font-bold opacity-60">{formatTime(msg.timestamp)}</span>
+                                                {msg.fromMe && <Check size={12} className="opacity-80" strokeWidth={3}/>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="p-6 bg-white/95 backdrop-blur-3xl border-t border-slate-200/60 flex items-center gap-4 z-10">
+                                <button className="p-2 text-slate-400 hover:text-brand-500 transition-colors"><Smile size={24}/></button>
+                                <div className="flex-1 relative">
+                                    <input 
+                                        className="w-full bg-slate-100/80 border-none rounded-[24px] px-6 py-3.5 text-xs font-bold focus:ring-[4px] focus:ring-brand-500/10 transition-all shadow-inner text-slate-800"
+                                        placeholder="Digite aqui sua mensagem ou comando IA..."
+                                        value={newMessage}
+                                        onChange={e => setNewMessage(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                                    />
+                                </div>
+                                <button onClick={handleSendMessage} className="p-4 bg-gradient-to-br from-brand-500 to-brand-700 text-white rounded-[24px] shadow-[0_10px_20px_rgba(59,130,246,0.3)] hover:scale-105 active:scale-95 transition-all">
+                                    <Send size={20} />
+                                </button>
+                            </div>
+                        </>
                     ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center animate-fade-in relative">
-                        <div className="w-24 h-24 bg-white rounded-[32px] shadow-[0_12px_24px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-200 mb-6 border border-slate-50 relative z-10">
-                          <MessageCircle size={48} className="opacity-20" />
+                        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-10 text-center animate-fade-in relative">
+                            <div className="w-24 h-24 bg-white rounded-[32px] shadow-[0_12px_24px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-200 mb-6 border border-slate-50 relative z-10">
+                                <MessageCircle size={48} className="opacity-20" />
+                            </div>
+                            <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter relative z-10">WhatsApp Engine Ready</h2>
+                            <p className="text-[10px] max-w-sm mt-2 font-black uppercase tracking-[0.25em] text-slate-400 relative z-10 opacity-70">Selecione um lead no pool para interagir</p>
                         </div>
-
-                        <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter relative z-10">
-                          WhatsApp Engine Ready
-                        </h2>
-
-                        <p className="text-[10px] max-w-sm mt-2 font-black uppercase tracking-[0.25em] text-slate-400 relative z-10 opacity-70">
-                          Selecione um lead no pool para interagir
-                        </p>
-                      </div>
                     )}
-                  </div>
+                </div>
                 </>
-              )}
+                )}
             </div>
           )}
-
 
           {/* IMPORT TAB */}
           {activeTab === 'import' && (
