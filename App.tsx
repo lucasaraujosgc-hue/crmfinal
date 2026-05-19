@@ -936,11 +936,41 @@ const App: React.FC = () => {
                             </div>
                             <h4 className="font-black text-slate-800 text-sm mb-3 uppercase leading-tight line-clamp-3 h-12 group-hover:text-brand-800 transition-colors relative z-10">{rule.motivoSituacao}</h4>
                             <div className="mt-4 space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-2 z-10">
-                                {rule.instructions.map((inst, i) => (
-                                    <div key={i} className="p-3 bg-slate-50/80 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors shadow-sm">
-                                        <p className="text-[10px] text-slate-600 font-semibold italic leading-relaxed tracking-tight">"{inst.content}"</p>
+                                {rule.reasonExplanation && (
+                                    <div className="p-3 bg-slate-50/80 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors shadow-sm">
+                                        <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Motivo / Explicação</p>
+                                        <p className="text-[10px] text-slate-600 font-medium leading-relaxed">{rule.reasonExplanation}</p>
                                     </div>
-                                ))}
+                                )}
+                                {rule.regularizationProcess && (
+                                    <div className="p-3 bg-emerald-50/50 rounded-2xl border border-emerald-100/50 group-hover:bg-emerald-50 transition-colors shadow-sm">
+                                        <p className="text-[9px] font-black uppercase text-emerald-600 mb-1">Processo de Regularização</p>
+                                        <p className="text-[10px] text-emerald-800 font-medium leading-relaxed">{rule.regularizationProcess}</p>
+                                    </div>
+                                )}
+                                {rule.requiredInfo && (
+                                    <div className="p-3 bg-brand-50/50 rounded-2xl border border-brand-100/50 group-hover:bg-brand-50 transition-colors shadow-sm">
+                                        <p className="text-[9px] font-black uppercase text-brand-600 mb-1">Informações Necessárias</p>
+                                        <p className="text-[10px] text-brand-800 font-medium leading-relaxed">{rule.requiredInfo}</p>
+                                    </div>
+                                )}
+                                {rule.defaultResponse && (
+                                    <div className="p-3 bg-slate-100 rounded-2xl flex gap-2 shadow-sm border border-slate-200">
+                                        <Bot size={14} className="text-slate-400 shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="text-[9px] font-black uppercase text-slate-500 mb-1">Resposta Padrão</p>
+                                            <p className="text-[10px] text-slate-700 italic font-medium leading-relaxed">"{rule.defaultResponse}"</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {rule.instructions && rule.instructions.length > 0 && (
+                                    <div className="p-3 bg-slate-50/80 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors shadow-sm mt-3">
+                                        <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Diretrizes Legadas</p>
+                                        {rule.instructions.map((inst, i) => (
+                                            <p key={i} className="text-[10px] text-slate-600 font-semibold italic leading-relaxed tracking-tight mb-1 last:mb-0">"{inst.content}"</p>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -975,23 +1005,25 @@ const App: React.FC = () => {
                                     <p className="text-[9px] text-slate-400 ml-2 font-bold">Dica: Use a lista suspensa para selecionar motivos exatos que já existem na sua base.</p>
                                 </div>
                                 <div className="space-y-4">
-                                    <div className="flex justify-between items-center mb-2 ml-1">
-                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">Diretrizes de Comportamento IA</label>
-                                        <button onClick={() => setEditingRule({...editingRule, instructions: [...editingRule.instructions, { id: uuidv4(), title: 'Info', type: 'simple', content: '' }]})} className="px-4 py-1.5 bg-brand-50 text-brand-700 text-[9px] font-black uppercase tracking-widest rounded-lg hover:bg-brand-600 hover:text-white transition-all shadow-sm">+ Adicionar</button>
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] ml-1">Explicação do Motivo</label>
+                                        <textarea className="input-premium flex-1 min-h-[60px] text-xs font-semibold leading-relaxed p-4 rounded-2xl shadow-sm focus:ring-brand-500/20" value={editingRule.reasonExplanation || ''} onChange={e => setEditingRule({...editingRule, reasonExplanation: e.target.value})} placeholder="Explique de forma simples por que a inscrição foi baixada/suspensa por este motivo..." />
                                     </div>
-                                    <div className="space-y-4">
-                                        {editingRule.instructions.map((inst, i) => (
-                                            <div key={i} className="flex gap-4 items-start animate-fade-in group/edit">
-                                                <div className="flex-1 relative">
-                                                   <textarea className="input-premium flex-1 min-h-[80px] text-xs font-semibold leading-relaxed p-4 rounded-2xl shadow-sm focus:ring-brand-500/20" value={inst.content} onChange={e => {
-                                                        const ni = [...editingRule.instructions]; ni[i].content = e.target.value; setEditingRule({...editingRule, instructions: ni});
-                                                    }} placeholder="A IA deve responder para este lead que..." />
-                                                </div>
-                                                <button onClick={() => {
-                                                    const ni = editingRule.instructions.filter((_, idx) => idx !== i); setEditingRule({...editingRule, instructions: ni});
-                                                }} className="p-3 text-rose-200 hover:text-rose-500 hover:bg-rose-50 mt-2 transition-all rounded-xl active:scale-90"><Trash2 size={20}/></button>
-                                            </div>
-                                        ))}
+                                    
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] ml-1">Processo de Regularização</label>
+                                        <textarea className="input-premium flex-1 min-h-[80px] text-xs font-semibold leading-relaxed p-4 rounded-2xl shadow-sm focus:ring-emerald-500/20" value={editingRule.regularizationProcess || ''} onChange={e => setEditingRule({...editingRule, regularizationProcess: e.target.value})} placeholder="Qual o passo a passo para o cliente regularizar essa situação?" />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] ml-1">Informações Necessárias</label>
+                                        <textarea className="input-premium flex-1 min-h-[60px] text-xs font-semibold leading-relaxed p-4 rounded-2xl shadow-sm focus:ring-amber-500/20" value={editingRule.requiredInfo || ''} onChange={e => setEditingRule({...editingRule, requiredInfo: e.target.value})} placeholder="Quais documentos ou informações precisamos pedir para ajudar?" />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] ml-1">Resposta Padrão (Fallback)</label>
+                                        <textarea className="input-premium flex-1 min-h-[60px] text-xs font-semibold leading-relaxed p-4 rounded-2xl shadow-sm focus:ring-blue-500/20" value={editingRule.defaultResponse || ''} onChange={e => setEditingRule({...editingRule, defaultResponse: e.target.value})} placeholder="Resposta padrão se a IA não conseguir responder e precisar marcar para humano..." />
+                                        <p className="text-[9px] text-slate-400 ml-1 font-medium">Se a IA se deparar com uma pergunta fora do escopo, ela usará essa resposta e deixará o chat para atendimento humano.</p>
                                     </div>
                                 </div>
                             </div>

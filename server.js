@@ -229,6 +229,7 @@ client.on('message', async (msg) => {
             // --- INTELIGÊNCIA DE RESPOSTA CONTEXTUAL ---
             let ruleContext = "";
             let matchedRuleName = "Nenhuma regra específica";
+            let currentDefaultResponse = "";
 
             if (company.motivo_situacao_cadastral && aiConfig.knowledgeRules) {
                 const leadMotivoNorm = normalizeText(company.motivo_situacao_cadastral);
@@ -242,11 +243,23 @@ client.on('message', async (msg) => {
 
                 if (matchedRule) {
                     matchedRuleName = matchedRule.motivoSituacao;
+                    let instrStr = ``;
+                    if (matchedRule.reasonExplanation) instrStr += `\n- EXPLICAÇÃO DO MOTIVO: ${matchedRule.reasonExplanation}`;
+                    if (matchedRule.regularizationProcess) instrStr += `\n- PROCESSO DE REGULARIZAÇÃO: ${matchedRule.regularizationProcess}`;
+                    if (matchedRule.requiredInfo) instrStr += `\n- INFORMAÇÕES NECESSÁRIAS: ${matchedRule.requiredInfo}`;
+                    if (matchedRule.defaultResponse) {
+                        currentDefaultResponse = matchedRule.defaultResponse;
+                        instrStr += `\n- RESPOSTA PADRÃO PARA EXCEÇÕES: Se o lead fizer uma pergunta na qual você não saberia a resposta ou está fora do escopo do processo de regularização, responda EXATAMENTE com o texto a seguir e encerre a conversa por hora: "${matchedRule.defaultResponse}" e não forneça informações adicionais.`;
+                    }
+                    
+                    if (matchedRule.instructions && matchedRule.instructions.length > 0) {
+                        instrStr += '\n- INSTRUÇÕES ADICIONAIS:\n' + matchedRule.instructions.map(inst => `  - ${inst.content}`).join('\n');
+                    }
+
                     ruleContext = `
 [CONTEXTO JURÍDICO/TÉCNICO PRIORITÁRIO]
 Motivo da Inaptidão na SEFAZ: "${company.motivo_situacao_cadastral}"
-Instruções da Base de Conhecimento para este caso:
-${matchedRule.instructions.map(inst => `- ${inst.title}: ${inst.content}`).join('\n')}
+Diretrizes da Base de Conhecimento para este caso:${instrStr}
 `;
                 }
             }
@@ -301,6 +314,21 @@ ${ruleContext}
                 }
                 
                 if (finalText && finalText.length > 2) {
+                    // Verificação de Resposta Padrão / Fallback
+                    let isFallback = false;
+                    const cText = normalizeText(finalText);
+                    const defaultNorm = normalizeText(currentDefaultResponse);
+                    
+                    if (defaultNorm && defaultNorm.length > 5 && cText.includes(defaultNorm)) {
+                        isFallback = true;
+                    }
+
+                    // Se a IA bater na Resposta Padrão, desativa a IA para este lead imediatamente
+                    if (isFallback) {
+                        db.run(`UPDATE resultado SET ai_active = 0 WHERE id = ?`, [company.id]);
+                        logSystem('info', 'whatsapp', `IA Auto Disable para o lead ${company.razao_social} após resposta padrão.`);
+                    }
+
                     // Delay humano para naturalidade
                     setTimeout(async () => {
                         await client.sendMessage(msg.from, finalText);

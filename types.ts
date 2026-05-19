@@ -63,6 +63,10 @@ export interface KnowledgeRule {
   id: string;
   motivoSituacao: string; 
   instructions: Instruction[];
+  regularizationProcess?: string;
+  requiredInfo?: string;
+  reasonExplanation?: string;
+  defaultResponse?: string;
   isActive: boolean;
 }
 
