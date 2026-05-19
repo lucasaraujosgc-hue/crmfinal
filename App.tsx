@@ -5,7 +5,7 @@ import {
   User, X, Rocket, Trello, Edit,
   MoreVertical, Smile, Check, Cpu, Terminal,
   Zap, Activity,
-  Database, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode
+  Database, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode, Calculator
 } from 'lucide-react';
 import { CompanyResult, Status, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
 import { DEFAULT_AI_PERSONA } from './constants';
@@ -141,6 +141,13 @@ const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onR
                 <option value="sent">Enviado</option>
                 <option value="replied">Respondido</option>
                 <option value="interested">Quente</option>
+            </select>
+            
+            <select className="bg-slate-50 border-none rounded-xl px-3 py-2.5 text-[10px] font-black uppercase text-slate-600 focus:ring-2 focus:ring-brand-500/10 cursor-pointer shadow-sm min-w-[120px]"
+                value={filters.hasAccountant || 'all'} onChange={e => setFilters({...filters, hasAccountant: e.target.value})}>
+                <option value="all">Contador?</option>
+                <option value="yes">Possui</option>
+                <option value="no">Sem Contador</option>
             </select>
             
             {onRefresh && (
@@ -347,6 +354,14 @@ const App: React.FC = () => {
     fetchAiConfig();
   }, []);
 
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeTab === 'whatsapp') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeTab]);
+
   useInterval(() => {
     fetchWhatsAppStatus();
     if (activeTab === 'whatsapp' && waSession.status === 'connected') {
@@ -355,6 +370,10 @@ const App: React.FC = () => {
     }
     if (activeTab === 'logs') {
         fetchLogs();
+    }
+    if (activeTab === 'import') {
+        fetchImports();
+        fetchCompanies();
     }
   }, 3000);
 
@@ -526,14 +545,17 @@ const App: React.FC = () => {
 
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {
+      const searchTxt = filters.search?.replace(/\D/g, '') || filters.search?.toLowerCase() || '';
       const searchMatch = !filters.search || 
         c.razaoSocial?.toLowerCase().includes(filters.search.toLowerCase()) ||
-        c.cnpj?.includes(filters.search);
+        c.cnpj?.includes(filters.search) ||
+        c.telefone?.replace(/\D/g, '').includes(searchTxt);
       const cityMatch = !filters.city || c.municipio === filters.city;
-      const reasonMatch = !filters.reason || (c.motivoSituacao && c.motivoSituacao.toLowerCase().includes(filters.reason.toLowerCase()));
+      const reasonMatch = !filters.reason || (c.motivoSituacao && c.motivoSituacao === filters.reason);
       const waMatch = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
       const phoneMatch = filters.hasPhone === 'all' ? true : (filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone);
-      return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch;
+      const accMatch = filters.hasAccountant === 'all' ? true : (filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador);
+      return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch && accMatch;
     });
   }, [companies, filters]);
 
@@ -564,21 +586,21 @@ const App: React.FC = () => {
     <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sans selection:bg-brand-100 selection:text-brand-900">
       
       {/* Sidebar Compactada */}
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-[#0f172a] text-white transition-all duration-300 ease-in-out flex flex-col z-30 shadow-[4px_0_24px_rgba(0,0,0,0.15)] relative`}>
+      <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-[#1f2937] text-white transition-all duration-300 ease-in-out flex flex-col z-30 shadow-[4px_0_24px_rgba(0,0,0,0.15)] relative`}>
         <div className="p-6 border-b border-white/5 flex items-center justify-between overflow-hidden">
           {isSidebarOpen ? (
-            <div className="flex items-center gap-3 animate-fade-in">
-              <div className="w-9 h-9 bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl flex items-center justify-center shadow-[0_8px_16px_rgba(59,130,246,0.3)] ring-1 ring-white/20">
-                <Rocket className="text-white" size={18} />
+            <div className="flex items-center gap-3 animate-fade-in pl-1">
+              <div className="w-10 h-10 bg-slate-800 rounded-xl border border-white/10 flex shrink-0 items-center justify-center text-brand-500 shadow-[0_0_15px_rgba(16,185,129,0.25)]">
+                <Calculator size={22} strokeWidth={2.5} />
               </div>
-              <div className="min-w-0">
-                <h2 className="font-black text-lg tracking-tight leading-none">VIRGULA</h2>
-                <p className="text-[8px] text-brand-400 font-black uppercase tracking-[0.25em] mt-1 opacity-80">CRM</p>
+              <div className="flex flex-col justify-center min-w-0">
+                <span className="text-xl font-bold text-white tracking-tight leading-none mb-0.5">Vírgula</span>
+                <span className="text-[9px] font-black text-brand-500 tracking-widest leading-none uppercase">Contábil</span>
               </div>
             </div>
           ) : (
-            <div className="w-9 h-9 bg-brand-600/10 rounded-xl flex items-center justify-center border border-brand-500/20 mx-auto">
-                <Rocket className="text-brand-500" size={18} />
+            <div className="w-10 h-10 bg-slate-800 rounded-xl border border-white/10 flex shrink-0 items-center justify-center text-brand-500 shadow-[0_0_15px_rgba(16,185,129,0.25)] mx-auto">
+                <Calculator size={22} strokeWidth={2.5} />
             </div>
           )}
         </div>
@@ -682,7 +704,7 @@ const App: React.FC = () => {
                      <button onClick={fetchLogs} className="btn-ghost text-xs font-bold uppercase">Refresh Logs</button>
                  </div>
                  
-                 <div className="card-premium border-none shadow-xl bg-[#0f172a] text-slate-300 font-mono text-xs overflow-hidden rounded-[24px]">
+                 <div className="card-premium border-none shadow-xl bg-[#1f2937] text-slate-300 font-mono text-xs overflow-hidden rounded-[24px]">
                      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 bg-slate-900/50">
                          <span className="font-bold text-brand-400 flex items-center gap-2"><Terminal size={14}/> LIVE LOG STREAM</span>
                          <div className="flex gap-2">
@@ -1234,6 +1256,7 @@ const App: React.FC = () => {
                                         </div>
                                     </div>
                                 ))}
+                                <div ref={messagesEndRef} />
                             </div>
 
                             <div className="p-6 bg-white/95 backdrop-blur-3xl border-t border-slate-200/60 flex items-center gap-4 z-10">
@@ -1290,7 +1313,7 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="card-premium overflow-hidden border-none shadow-2xl rounded-[32px]">
-                    <div className="bg-[#0f172a] px-8 py-5 flex justify-between items-center relative overflow-hidden">
+                    <div className="bg-[#1f2937] px-8 py-5 flex justify-between items-center relative overflow-hidden">
                         <div className="absolute inset-0 bg-brand-600 opacity-5 pointer-events-none"></div>
                         <h3 className="font-black text-white text-[9px] uppercase tracking-[0.3em] relative z-10 flex items-center gap-2">
                            <Activity size={12} className="text-brand-500" /> Extracted Batches
@@ -1325,6 +1348,14 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-6">
+                                    {imp.status !== 'completed' && imp.status !== 'error' && imp.total > 0 && (
+                                        <div className="w-48 mx-4 hidden md:block">
+                                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                                                <div className="h-full bg-brand-500 transition-all duration-300" style={{ width: `${(imp.processed / imp.total) * 100}%` }}></div>
+                                            </div>
+                                            <div className="text-right text-[9px] font-black mt-1 text-slate-400">{imp.processed} / {imp.total} processados</div>
+                                        </div>
+                                    )}
                                     <Badge variant={imp.status === 'completed' ? 'success' : 'warning'}>{imp.status.toUpperCase()}</Badge>
                                     <button onClick={() => deleteImport(imp.id)} className="p-3 text-slate-300 hover:text-rose-500 transition-all rounded-xl hover:bg-rose-50 shadow-sm active:scale-90">
                                       <Trash2 size={18}/>

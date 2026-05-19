@@ -95,5 +95,6 @@ export interface ImportBatch {
   filename: string;
   date: string;
   total: number;
+  processed: number;
   status: string;
 }

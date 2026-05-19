@@ -16,6 +16,9 @@ import { Groq } from 'groq-sdk';
 import multer from 'multer';
 import sqlite3 from 'sqlite3';
 import { v4 as uuidv4 } from 'uuid';
+import * as cheerio from 'cheerio';
+const pdf = require('pdf-parse');
+const puppeteer = require('puppeteer');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +31,8 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const AUTH_DIR = path.join(DATA_DIR, 'whatsapp_auth');
 const DB_PATH = path.join(DATA_DIR, 'consultas.db');
 const AI_CONFIG_PATH = path.join(DATA_DIR, 'ai-config.json');
+
+const upload = multer({ dest: UPLOADS_DIR });
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -226,6 +231,36 @@ client.on('message', async (msg) => {
                 db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [waId, company.id]);
             }
 
+            let userMessageBody = msg.body;
+
+            if (msg.hasMedia && (msg.type === 'audio' || msg.type === 'ptt')) {
+                logSystem('info', 'whatsapp', 'Áudio recebido, iniciando transcrição...');
+                try {
+                    const media = await msg.downloadMedia();
+                    if (aiConfig.apiKeys?.groq) {
+                        const groq = new Groq({ apiKey: aiConfig.apiKeys.groq });
+                        // Transformar base64 em arquivo
+                        const tmpPath = path.join(UPLOADS_DIR, `audio_${Date.now()}.${media.mimetype.split('/')[1].split(';')[0] || 'ogg'}`);
+                        fs.writeFileSync(tmpPath, Buffer.from(media.data, 'base64'));
+                        
+                        const transcription = await groq.audio.transcriptions.create({
+                            file: fs.createReadStream(tmpPath),
+                            model: "whisper-large-v3",
+                            prompt: "A audio from a client.",
+                            response_format: "json",
+                            language: "pt",
+                        });
+                        userMessageBody = `[O USUÁRIO LHE ENVIOU UM ÁUDIO COM A SEGUINTE TRANSCRIÇÃO]: "${transcription.text}"`;
+                        fs.unlinkSync(tmpPath); // Clean up
+                    } else {
+                        userMessageBody = "[O usuário enviou um áudio, mas o sistema está sem chave do Groq para transcrever. Peça que ele digite.]";
+                    }
+                } catch (err) {
+                    logSystem('error', 'whatsapp', 'Erro na transcrição de áudio', { error: err.message });
+                    userMessageBody = "[O usuário enviou um áudio, mas houve uma falha ao escutar. Peça que ele digite.]";
+                }
+            }
+
             // --- INTELIGÊNCIA DE RESPOSTA CONTEXTUAL ---
             let ruleContext = "";
             let matchedRuleName = "Nenhuma regra específica";
@@ -298,16 +333,16 @@ ${ruleContext}
                 if (provider === 'groq') {
                     const groq = new Groq({ apiKey: aiConfig.apiKeys?.groq || "" });
                     const chatCompletion = await groq.chat.completions.create({
-                        messages: [{ role: "system", content: strictInstruction }, { role: "user", content: msg.body || "" }],
+                        messages: [{ role: "system", content: strictInstruction }, { role: "user", content: userMessageBody || "" }],
                         model: aiConfig.model || "llama-3.1-8b-instant",
                         temperature: aiConfig.temperature || 0.5 
                     });
                     finalText = chatCompletion.choices[0]?.message?.content || "";
                 } else {
-                    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || aiConfig.apiKeys?.gemini || "" });
                     const response = await ai.models.generateContent({ 
-                        model: aiConfig.model || 'gemini-3-flash-preview',
-                        contents: [{ parts: [{ text: msg.body || "Olá" }] }],
+                        model: aiConfig.model || 'gemini-3.1-8b-instant', // Fallback to safe model if needed, but the original was 'gemini-3-flash-preview', I'll keep the variable
+                        contents: [{ parts: [{ text: userMessageBody || "Olá" }] }],
                         config: { systemInstruction: strictInstruction, temperature: aiConfig.temperature || 0.5 }
                     });
                     finalText = response.text;
@@ -380,11 +415,171 @@ function startCampaignSending(campaignId, message) {
     processQueue();
 }
 
+// --- PDF AND SCRAPING PROCESSING LOGIC ---
+async function processPDFAndScrape(filepath, processId, filename) {
+    db.run("UPDATE consulta SET status = 'processing', processed = 0 WHERE id = ?", [processId]);
+    logSystem('info', 'scraper', `Iniciando processamento do arquivo: ${filename}`);
+
+    let extractedText = '';
+    try {
+        const dataBuffer = fs.readFileSync(filepath);
+        const data = await pdf(dataBuffer);
+        extractedText = data.text;
+    } catch (e) {
+        logSystem('error', 'scraper', `Falha ao ler PDF: ${filename}`, { error: e.message });
+        db.run("UPDATE consulta SET status = 'error', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
+        return;
+    }
+
+    // Identificar IEs
+    const ies = [];
+    // Padrão flexível para pegar números como "102.345.678" ou espaçados
+    const regex = /((?:\d\s*){1,3}\.(?:\d\s*){3}\.(?:\d\s*){3})\s*[-–]?/g;
+    let match;
+    while ((match = regex.exec(extractedText)) !== null) {
+        const cleanIE = match[1].replace(/\D/g, '');
+        if (cleanIE.length >= 8) ies.push(cleanIE);
+    }
+    const uniqueIEs = [...new Set(ies)];
+    
+    if (uniqueIEs.length === 0) {
+        logSystem('warning', 'scraper', `Nenhuma IE encontrada no arquivo: ${filename}`);
+        db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
+        return;
+    }
+    
+    db.run("UPDATE consulta SET total = ? WHERE id = ?", [uniqueIEs.length, processId]);
+    logSystem('info', 'scraper', `Encontradas ${uniqueIEs.length} IEs únicas. Iniciando scraping...`);
+
+    let browser;
+    try {
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        
+        for (let i = 0; i < uniqueIEs.length; i++) {
+            const ie = uniqueIEs[i];
+            logSystem('info', 'scraper', `Consultando IE ${i+1}/${uniqueIEs.length}: ${ie}`);
+            
+            try {
+                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { waitUntil: 'networkidle2', timeout: 30000 });
+                await page.waitForSelector('input[name="IE"]');
+                await page.type('input[name="IE"]', ie);
+                
+                // Clica no botão e espera o resultado
+                await Promise.all([
+                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                    page.evaluate(() => {
+                        const btns = document.querySelectorAll('input[type="submit"]');
+                        for(let b of btns) {
+                            if(b.value.includes('IE')) { b.click(); return; }
+                        }
+                    })
+                ]);
+                
+                const html = await page.content();
+                const $ = cheerio.load(html);
+                
+                const scrapeField = (label) => {
+                    let val = null;
+                    $('b').each((_, el) => {
+                        if ($(el).text().includes(label)) {
+                            val = $(el)[0].nextSibling ? $(el)[0].nextSibling.nodeValue : null;
+                        }
+                    });
+                    return val ? val.replace(/\xA0/g, ' ').trim() : null;
+                };
+
+                let razaoSocial = scrapeField('Razão Social:');
+                let cnpj = scrapeField('CNPJ:');
+                let uf = scrapeField('UF:');
+                let municipio = scrapeField('Município:');
+                let logradouro = scrapeField('Logradouro:');
+                let telefone = scrapeField('Telefone:');
+                let email = scrapeField('E-mail:');
+                let situacaoCadastral = scrapeField('Situação Cadastral Vigente:');
+                let motivoSituacao = scrapeField('Motivo desta Situação Cadastral:');
+                let nomeContador = scrapeField('Nome:'); // do contador
+                
+                let atividade = null;
+                $('b').each((_, el) => {
+                    if ($(el).text().includes('Atividade Econômica')) {
+                        const trPai = $(el).closest('tr');
+                        if (trPai.length && trPai.next().length) {
+                           atividade = trPai.next().text().replace(/\xA0/g, ' ').trim();
+                        }
+                    }
+                });
+
+                if (razaoSocial) {
+                    db.run(`INSERT INTO resultado 
+                    (consulta_id, inscricao_estadual, cnpj, razao_social, municipio, uf, logradouro, telefone, email, 
+                    atividade_economica_principal, situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`,
+                     [processId, ie, cnpj, razaoSocial, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, motivoSituacao, nomeContador]);
+                } else {
+                    db.run(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Não encontrado')`, [processId, ie]);
+                }
+
+            } catch (err) {
+                logSystem('error', 'scraper', `Falha ao processar IE ${ie}`, { error: err.message });
+                db.run(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Falha Navegação')`, [processId, ie]);
+            }
+            
+            db.run("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
+        }
+    } catch (e) {
+        logSystem('error', 'scraper', `Erro fatal no browser Puppeteer`, { error: e.message });
+    } finally {
+        if (browser) await browser.close();
+        db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
+        logSystem('info', 'scraper', `Processamento finalizado para: ${filename}`);
+    }
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// API Endpoints
+// API Endpoints para Scraping
+app.post('/start-processing', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+    
+    const processId = uuidv4();
+    const filename = req.file.originalname;
+    
+    db.run("INSERT INTO consulta (id, filename, total, processed, status, start_time) VALUES (?, ?, 0, 0, 'queued', ?)", 
+        [processId, filename, new Date().toISOString()]);
+        
+    processPDFAndScrape(req.file.path, processId, filename);
+    
+    res.json({ processId });
+});
+
+app.get('/get-imports', (req, res) => {
+    db.all("SELECT * FROM consulta ORDER BY start_time DESC", (err, rows) => {
+        if (err) return res.status(500).json({error: err.message});
+        res.json(rows.map(r => ({
+            id: r.id, 
+            filename: r.filename, 
+            date: r.start_time,
+            total: r.total,
+            processed: r.processed,
+            status: r.status
+        })));
+    });
+});
+
+app.delete('/api/imports/:id', (req, res) => {
+    db.run("DELETE FROM resultado WHERE consulta_id = ?", [req.params.id], () => {
+        db.run("DELETE FROM consulta WHERE id = ?", [req.params.id], () => {
+            res.json({ success: true });
+        });
+    });
+});
+
 app.get('/api/logs', (req, res) => {
     // Retorna os logs da memória RAM
     res.json(memoryLogs);
