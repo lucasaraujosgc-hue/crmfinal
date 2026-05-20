@@ -584,13 +584,21 @@ function startCampaignSending(campaignId, message) {
 
                 const contact = await client.getContactById(numberId._serialized);
                 const finalWaId = contact?.id?._serialized || numberId._serialized;
+                let storeWaId = finalWaId;
+                
+                try {
+                    const lidMap = await client.getContactLidAndPhone([finalWaId]);
+                    if (lidMap && lidMap[0] && lidMap[0].lid) {
+                        storeWaId = lidMap[0].lid; // Store the LID for better incoming mapping
+                    }
+                } catch (err) {}
 
                 const sentMsg = await client.sendMessage(finalWaId, finalMessage);
                 
-                logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: finalWaId });
+                logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: finalWaId, expectedLid: storeWaId !== finalWaId ? storeWaId : undefined });
 
                 db.run(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ?, wa_id = ? WHERE id = ?`, 
-                       [new Date().toISOString(), finalWaId, lead.id], () => {
+                       [new Date().toISOString(), storeWaId, lead.id], () => {
                     setTimeout(processQueue, Math.floor(Math.random() * 15000) + 15000);
                 });
             } catch (e) {
@@ -621,9 +629,10 @@ async function processPDFAndScrape(filepath, processId, filename) {
 
     // Identificar IEs
     const ies = [];
-    const regex = /(\d{1,3}\.\d{1,3}\.\d{1,3})\s*-/g;
+    const normalized = extractedText.replace(/\s+/g, '');
+    const regex = /(\d{1,3}\.\d{1,3}\.\d{1,3})-/g;
     let match;
-    while ((match = regex.exec(extractedText)) !== null) {
+    while ((match = regex.exec(normalized)) !== null) {
         const cleanIE = match[1].replace(/\D/g, '');
         if (cleanIE.length === 8 || cleanIE.length === 9) ies.push(cleanIE);
     }
@@ -1051,7 +1060,16 @@ app.post('/api/whatsapp/send', async (req, res) => {
             if (numberId) {
                 const contact = await client.getContactById(numberId._serialized);
                 targetId = contact?.id?._serialized || numberId._serialized;
-                db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [targetId, leadId]);
+                
+                let storeWaId = targetId;
+                try {
+                    const lidMap = await client.getContactLidAndPhone([targetId]);
+                    if (lidMap && lidMap[0] && lidMap[0].lid) {
+                        storeWaId = lidMap[0].lid;
+                    }
+                } catch(e) {}
+
+                db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [storeWaId, leadId]);
             }
         }
         await client.sendMessage(targetId, message);
