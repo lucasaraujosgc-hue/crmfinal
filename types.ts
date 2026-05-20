@@ -28,6 +28,7 @@ export interface CompanyResult {
   razaoSocial: string;
   nomeFantasia?: string; // Adicionado
   municipio: string;
+  uf?: string;
   telefone: string | null;
   situacaoCadastral: string;
   dataSituacaoCadastral?: string; // Adicionado
