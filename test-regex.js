@@ -10,9 +10,10 @@ const extractedText = `PAG. 15
 2 05 .5 74 .8 63 -M E L A R O S E L T D A`;
 
     const ies = [];
-    const regex = /(?:\d\s*){2,3}\s*\.\s*(?:\d\s*){3}\s*\.\s*(?:\d\s*){3}/g;
+    const normalized = extractedText.replace(/ /g, '');
+    const regex = /\d{2,3}\.\d{3}\.\d{3}/g;
     let match;
-    while ((match = regex.exec(extractedText)) !== null) {
+    while ((match = regex.exec(normalized)) !== null) {
         const cleanIE = match[0].replace(/\D/g, '');
         if (cleanIE.length === 8 || cleanIE.length === 9) ies.push(cleanIE);
     }

@@ -111,10 +111,10 @@ const StatusBadge = ({ status }: { status: string }) => {
 const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onRefresh, totalResults }: any) => (
     <div className="flex flex-col xl:flex-row gap-4 items-center justify-between bg-white border border-slate-200 p-4 rounded-lg shadow-sm mb-6">
         <div className="flex-1 relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             <input 
                 type="text" 
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all placeholder:text-slate-400"
+                className="w-full pl-12 pr-4 py-3 border border-slate-300 rounded-md text-base focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all placeholder:text-slate-400 font-medium"
                 placeholder="Filtrar por Razão Social, CNPJ, ou Telefone..."
                 value={filters.search}
                 onChange={e => setFilters({...filters, search: e.target.value})}
@@ -164,7 +164,7 @@ const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onR
 );
 
 // Tabela de Empresas Compactada
-const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi, onChat }: any) => (
+const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi, onChat, onViewDetails }: any) => (
     <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-sm">
@@ -184,7 +184,7 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                         <th className="px-6 py-3 font-semibold text-slate-600 w-[20%]">Status</th>
                         <th className="px-6 py-3 font-semibold text-slate-600 w-[30%]">Motivo SEFAZ</th>
                         {onToggleAi && <th className="px-6 py-3 font-semibold text-slate-600 text-center w-[10%]">IA Auto</th>}
-                        {onChat && <th className="px-6 py-3 font-semibold text-slate-600 text-right w-[5%]"></th>}
+                        {(onChat || onViewDetails) && <th className="px-6 py-3 font-semibold text-slate-600 text-right w-[10%]"></th>}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -230,11 +230,20 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                                     </button>
                                 </td>
                             )}
-                            {onChat && (
+                            {(onChat || onViewDetails) && (
                                 <td className="px-6 py-3 text-right">
-                                    <button onClick={() => onChat(lead)} className="inline-flex items-center justify-center w-8 h-8 rounded-md text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors">
-                                        <MessageCircle size={18} />
-                                    </button>
+                                    <div className="flex justify-end gap-1">
+                                        {onViewDetails && (
+                                            <button onClick={() => onViewDetails(lead)} className="inline-flex items-center justify-center w-8 h-8 rounded-md text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="Detalhes da Empresa">
+                                                <ScrollText size={18} />
+                                            </button>
+                                        )}
+                                        {onChat && (
+                                            <button onClick={() => onChat(lead)} className="inline-flex items-center justify-center w-8 h-8 rounded-md text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="Abrir Chat WhatsApp">
+                                                <MessageCircle size={18} />
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             )}
                         </tr>
@@ -305,6 +314,7 @@ const App: React.FC = () => {
   const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
   
   const [isFlowEditorOpen, setIsFlowEditorOpen] = useState(false);
+  const [viewDetailsLead, setViewDetailsLead] = useState<CompanyResult | null>(null);
   
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
@@ -733,7 +743,7 @@ const App: React.FC = () => {
                               </div>
                               <div className="flex-1 space-y-3 overflow-y-auto custom-scrollbar">
                                   {companies.filter(c => c.campaignStatus === status).map(lead => (
-                                      <KanbanCard key={lead.id} company={lead} onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.telefone?.replace(/\D/g, '') + '@c.us'); }} />
+                                      <KanbanCard key={lead.id} company={lead} onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || (lead.telefone?.replace(/\D/g, '') + '@c.us')); }} />
                                   ))}
                               </div>
                           </div>
@@ -964,7 +974,8 @@ const App: React.FC = () => {
                     toggleSelectAll={toggleSelectAll} 
                     selectable={true}
                     onToggleAi={toggleLeadAI}
-                    onChat={(lead: CompanyResult) => { setActiveTab('whatsapp'); setActiveChat(lead.telefone?.replace(/\D/g, '') + '@c.us'); }}
+                    onChat={(lead: CompanyResult) => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || (lead.telefone?.replace(/\D/g, '') + '@c.us')); }}
+                    onViewDetails={setViewDetailsLead}
                 />
             </div>
           )}
@@ -1134,6 +1145,85 @@ const App: React.FC = () => {
                     />
                 )}
             </div>
+          )}
+
+          {/* VIEW DETAILS MODAL */}
+          {viewDetailsLead && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+                  <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
+                      <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                          <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                              <ScrollText className="text-brand-600" size={20} />
+                              Detalhes da Empresa
+                          </h3>
+                          <button onClick={() => setViewDetailsLead(null)} className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                              <X size={20} />
+                          </button>
+                      </div>
+                      <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                              <div>
+                                  <span className="block text-xs font-semibold uppercase text-slate-400 mb-1">Razão Social</span>
+                                  <p className="font-medium text-slate-800">{viewDetailsLead.razaoSocial || 'N/A'}</p>
+                              </div>
+                              <div>
+                                  <span className="block text-xs font-semibold uppercase text-slate-400 mb-1">Nome Fantasia</span>
+                                  <p className="font-medium text-slate-800">{viewDetailsLead.nomeFantasia || 'N/A'}</p>
+                              </div>
+                              <div>
+                                  <span className="block text-xs font-semibold uppercase text-slate-400 mb-1">CNPJ</span>
+                                  <p className="font-mono text-sm text-slate-700">{viewDetailsLead.cnpj || 'N/A'}</p>
+                              </div>
+                              <div>
+                                  <span className="block text-xs font-semibold uppercase text-slate-400 mb-1">Inscrição Estadual</span>
+                                  <p className="font-mono text-sm text-slate-700">{viewDetailsLead.inscricaoEstadual || 'N/A'}</p>
+                              </div>
+                              <div>
+                                  <span className="block text-xs font-semibold uppercase text-slate-400 mb-1">Localização</span>
+                                  <p className="text-sm border-l-2 border-brand-200 pl-2 text-slate-700">{viewDetailsLead.municipio} - {viewDetailsLead.uf}</p>
+                              </div>
+                              <div>
+                                  <span className="block text-xs font-semibold uppercase text-slate-400 mb-1">Contato (Telefone)</span>
+                                  <p className="font-mono text-sm text-brand-600">{viewDetailsLead.telefone || 'N/A'}</p>
+                              </div>
+                          </div>
+                          <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                              <h4 className="text-xs font-bold uppercase text-slate-500 mb-4 border-b border-slate-200 pb-2">Status SEFAZ</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div>
+                                      <span className="block text-[10px] uppercase text-slate-400 mb-1">Situação Cadastral</span>
+                                      <Badge variant={viewDetailsLead.situacaoCadastral?.includes('ATIVA') ? 'success' : 'danger'}>{viewDetailsLead.situacaoCadastral}</Badge>
+                                  </div>
+                                  <div>
+                                      <span className="block text-[10px] uppercase text-slate-400 mb-1">Data da Situação</span>
+                                      <p className="text-sm font-medium text-slate-700">{viewDetailsLead.dataSituacaoCadastral || 'N/A'}</p>
+                                  </div>
+                                  <div className="col-span-1 md:col-span-2">
+                                      <span className="block text-[10px] uppercase text-slate-400 mb-1">Motivo / Detalhe</span>
+                                      <p className="text-sm text-slate-800 bg-white p-3 rounded border border-slate-200 shadow-sm">{viewDetailsLead.motivoSituacao || 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                      <span className="block text-[10px] uppercase text-slate-400 mb-1">Contador Responsável</span>
+                                      <p className="text-sm font-medium text-slate-700">{viewDetailsLead.nomeContador || 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                      <span className="block text-[10px] uppercase text-slate-400 mb-1">Identificador WhatsApp (wa_id)</span>
+                                      <p className="font-mono text-xs text-slate-500 break-all">{viewDetailsLead.wa_id || 'N/A'}</p>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                      <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end shrink-0">
+                          <button className="btn-primary" onClick={() => {
+                              setViewDetailsLead(null);
+                              setActiveTab('whatsapp'); 
+                              setActiveChat(viewDetailsLead.wa_id || (viewDetailsLead.telefone?.replace(/\D/g, '') + '@c.us'));
+                          }}>
+                              <MessageCircle size={16} /> Ir para o Chat
+                          </button>
+                      </div>
+                  </div>
+              </div>
           )}
 
           {/* FLUXO EDITOR MODALS (Global) */}

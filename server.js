@@ -516,17 +516,55 @@ function startCampaignSending(campaignId, message) {
             }
             if (!clientReady) return setTimeout(processQueue, 5000);
 
+            if (!lead.telefone) {
+                logSystem('error', 'campaign', `Telefone inválido para lead ${lead.id}`);
+                db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
+                return;
+            }
+
             try {
                 const cleanPhone = lead.telefone.replace(/\D/g, '');
+                if (cleanPhone.length < 10) {
+                     logSystem('error', 'campaign', `Telefone muito curto para lead ${lead.id} (${lead.telefone})`);
+                     db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
+                     return;
+                }
                 const target = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
                 const actualTarget = target + "@c.us";
                 
-                const sentMsg = await client.sendMessage(actualTarget, message);
+                let finalMessage = message || '';
+                finalMessage = finalMessage.replace(/\{\{razaoSocial\}\}/g, lead.razao_social || '');
+                finalMessage = finalMessage.replace(/\{\{nomeFantasia\}\}/g, lead.nome_fantasia || '');
+                finalMessage = finalMessage.replace(/\{\{cnpj\}\}/g, lead.cnpj || '');
+                finalMessage = finalMessage.replace(/\{\{municipio\}\}/g, lead.municipio || '');
+                finalMessage = finalMessage.replace(/\{\{uf\}\}/g, lead.uf || '');
+                finalMessage = finalMessage.replace(/\{\{situacaoCadastral\}\}/g, lead.situacao_cadastral || '');
+                finalMessage = finalMessage.replace(/\{\{motivoSituacao\}\}/g, lead.motivo_situacao_cadastral || '');
+                finalMessage = finalMessage.replace(/\{\{nomeContador\}\}/g, lead.nome_contador || '');
+                finalMessage = finalMessage.replace(/\{\{inscricaoEstadual\}\}/g, lead.inscricao_estadual || '');
+
+                if (!finalMessage.trim()) {
+                    logSystem('error', 'campaign', `Mensagem vazia para lead ${lead.id}`);
+                    db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
+                    return;
+                }
                 
-                logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: actualTarget });
+                const numberId = await client.getNumberId(actualTarget);
+                if (!numberId) {
+                    logSystem('error', 'campaign', `Número não possui WhatsApp: ${actualTarget}`);
+                    db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 5000));
+                    return;
+                }
+
+                const contact = await client.getContactById(numberId._serialized);
+                const finalWaId = contact?.id?._serialized || numberId._serialized;
+
+                const sentMsg = await client.sendMessage(finalWaId, finalMessage);
+                
+                logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: finalWaId });
 
                 db.run(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ?, wa_id = ? WHERE id = ?`, 
-                       [new Date().toISOString(), sentMsg.to, lead.id], () => {
+                       [new Date().toISOString(), finalWaId, lead.id], () => {
                     setTimeout(processQueue, Math.floor(Math.random() * 15000) + 15000);
                 });
             } catch (e) {
@@ -548,6 +586,7 @@ async function processPDFAndScrape(filepath, processId, filename) {
         const dataBuffer = fs.readFileSync(filepath);
         const data = await pdf(dataBuffer);
         extractedText = data.text;
+        logSystem('info', 'scraper', `Texto extraído (primeiros 500 chars): ${extractedText.substring(0, 500)}`);
     } catch (e) {
         logSystem('error', 'scraper', `Falha ao ler PDF: ${filename}`, { error: e.message });
         db.run("UPDATE consulta SET status = 'error', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
@@ -556,9 +595,10 @@ async function processPDFAndScrape(filepath, processId, filename) {
 
     // Identificar IEs
     const ies = [];
-    const regex = /(?:\d\s*){2,3}\s*\.\s*(?:\d\s*){3}\s*\.\s*(?:\d\s*){3}/g;
+    const normalized = extractedText.replace(/ /g, '');
+    const regex = /\d{2,3}\.\d{3}\.\d{3}/g;
     let match;
-    while ((match = regex.exec(extractedText)) !== null) {
+    while ((match = regex.exec(normalized)) !== null) {
         const cleanIE = match[0].replace(/\D/g, '');
         if (cleanIE.length === 8 || cleanIE.length === 9) ies.push(cleanIE);
     }
@@ -837,7 +877,7 @@ app.get('/api/unique-filters', (req, res) => {
 app.get('/get-all-results', (req, res) => {
   db.all('SELECT * FROM resultado ORDER BY id DESC', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ ...r, id: r.id.toString(), inscricaoEstadual: r.inscricao_estadual, razaoSocial: r.razao_social, nomeFantasia: r.nome_fantasia, situacaoCadastral: r.situacao_cadastral, motivoSituacao: r.motivo_situacao_cadastral, campaignStatus: r.campaign_status || 'pending', aiActive: r.ai_active === 1 })));
+    res.json(rows.map(r => ({ ...r, id: r.id.toString(), inscricaoEstadual: r.inscricao_estadual, razaoSocial: r.razao_social, nomeFantasia: r.nome_fantasia, situacaoCadastral: r.situacao_cadastral, motivoSituacao: r.motivo_situacao_cadastral, campaignStatus: r.campaign_status || 'pending', aiActive: r.ai_active === 1, wa_id: r.wa_id })));
   });
 });
 
@@ -889,13 +929,19 @@ app.get('/api/whatsapp/chats', async (req, res) => {
     if (!clientReady) return res.json([]);
     try {
         const chats = await client.getChats();
-        res.json(chats.slice(0, 50).map(c => ({
-            id: c.id._serialized,
-            name: c.name,
-            lastMessage: c.lastMessage?.body,
-            timestamp: c.timestamp,
-            unreadCount: c.unreadCount
-        })));
+        db.all('SELECT wa_id, razao_social FROM resultado WHERE wa_id IS NOT NULL', (err, rows) => {
+            const leadMap = {};
+            if (!err) {
+                rows.forEach(r => leadMap[r.wa_id] = r.razao_social);
+            }
+            res.json(chats.slice(0, 50).map(c => ({
+                id: c.id._serialized,
+                name: leadMap[c.id._serialized] || c.name || c.id.user,
+                lastMessage: c.lastMessage?.body,
+                timestamp: c.timestamp,
+                unreadCount: c.unreadCount
+            })));
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -914,10 +960,19 @@ app.get('/api/whatsapp/messages/:chatId', async (req, res) => {
 });
 
 app.post('/api/whatsapp/send', async (req, res) => {
-    const { chatId, message } = req.body;
+    const { chatId, message, leadId } = req.body;
     try {
-        await client.sendMessage(chatId, message);
-        res.json({ success: true });
+        let targetId = chatId;
+        if (leadId) {
+            const numberId = await client.getNumberId(chatId);
+            if (numberId) {
+                const contact = await client.getContactById(numberId._serialized);
+                targetId = contact?.id?._serialized || numberId._serialized;
+                db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [targetId, leadId]);
+            }
+        }
+        await client.sendMessage(targetId, message);
+        res.json({ success: true, wa_id: targetId });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
