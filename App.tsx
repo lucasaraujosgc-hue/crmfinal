@@ -1129,19 +1129,20 @@ const App: React.FC = () => {
                         }} 
                     />
                 )}
-                
-                {isCampaignFlowEditorOpen && (
-                    <FlowEditorModal 
-                        rule={{ motivoSituacao: "Campanha: " + (newCampaign.name || 'Nova'), flowNodes: newCampaign.flowNodes, flowEdges: newCampaign.flowEdges }} 
-                        onClose={() => setIsCampaignFlowEditorOpen(false)} 
-                        onSave={(nodes: any[], edges: any[]) => {
-                            setNewCampaign({ ...newCampaign, flowNodes: nodes, flowEdges: edges });
-                            setIsCampaignFlowEditorOpen(false);
-                            alert("Fluxo da campanha salvo temporariamente. Finalize a criação da campanha para persistir.");
-                        }} 
-                    />
-                )}
             </div>
+          )}
+
+          {/* FLUXO EDITOR MODALS (Global) */}
+          {isCampaignFlowEditorOpen && (
+              <FlowEditorModal 
+                  rule={{ motivoSituacao: "Campanha: " + (newCampaign.name || 'Nova'), flowNodes: newCampaign.flowNodes, flowEdges: newCampaign.flowEdges }} 
+                  onClose={() => setIsCampaignFlowEditorOpen(false)} 
+                  onSave={(nodes: any[], edges: any[]) => {
+                      setNewCampaign({ ...newCampaign, flowNodes: nodes, flowEdges: edges });
+                      setIsCampaignFlowEditorOpen(false);
+                      alert("Fluxo da campanha salvo temporariamente. Finalize a criação da campanha para persistir.");
+                  }} 
+              />
           )}
 
            {/* SETTINGS TAB */}

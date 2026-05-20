@@ -316,7 +316,24 @@ client.on('message', async (msg) => {
                             visited.add(nodeId);
                             const node = matchedRule.flowNodes.find(n => n.id === nodeId);
                             if (!node) return '';
-                            let out = `\n${indent}- [${node.type.toUpperCase()}] ${node.data.label}`;
+                            let nodeStr = `[${node.type.toUpperCase()}]`;
+                            if (node.type === 'menu' && node.data?.options) {
+                                nodeStr += ` (Opções: ${node.data.options.map((o, i) => `[${i+1}] ${o.label}`).join(', ')})`;
+                            } else if (node.type === 'media') {
+                                nodeStr += ` (Arquivo do tipo: ${node.data?.mediaType || 'imagem'})`;
+                            }
+                            let labelWithVars = node.data?.label || '';
+                            labelWithVars = labelWithVars.replace(/\{\{razaoSocial\}\}/g, company.razao_social || '');
+                            labelWithVars = labelWithVars.replace(/\{\{nomeFantasia\}\}/g, company.nome_fantasia || '');
+                            labelWithVars = labelWithVars.replace(/\{\{cnpj\}\}/g, company.cnpj || '');
+                            labelWithVars = labelWithVars.replace(/\{\{municipio\}\}/g, company.municipio || '');
+                            labelWithVars = labelWithVars.replace(/\{\{uf\}\}/g, company.uf || '');
+                            labelWithVars = labelWithVars.replace(/\{\{situacaoCadastral\}\}/g, company.situacao_cadastral || '');
+                            labelWithVars = labelWithVars.replace(/\{\{motivoSituacao\}\}/g, company.motivo_situacao_cadastral || '');
+                            labelWithVars = labelWithVars.replace(/\{\{nomeContador\}\}/g, company.nome_contador || '');
+                            labelWithVars = labelWithVars.replace(/\{\{inscricaoEstadual\}\}/g, company.inscricao_estadual || '');
+                            
+                            let out = `\n${indent}- ${nodeStr} ${labelWithVars}`;
                             if (edgesMap[nodeId]) {
                                 edgesMap[nodeId].forEach(targetId => {
                                     out += parseNode(targetId, indent + '  ', visited);
@@ -368,7 +385,24 @@ Diretrizes da Base de Conhecimento para este caso:${instrStr}
                                     visited.add(nodeId);
                                     const node = flowNodes.find(n => n.id === nodeId);
                                     if (!node) return '';
-                                    let out = `\n${indent}- [${node.type.toUpperCase()}] ${node.data?.label}`;
+                                    let nodeStr = `[${node.type.toUpperCase()}]`;
+                                    if (node.type === 'menu' && node.data?.options) {
+                                        nodeStr += ` (Opções: ${node.data.options.map((o, i) => `[${i+1}] ${o.label}`).join(', ')})`;
+                                    } else if (node.type === 'media') {
+                                        nodeStr += ` (Arquivo do tipo: ${node.data?.mediaType || 'imagem'})`;
+                                    }
+                                    let labelWithVars = node.data?.label || '';
+                                    labelWithVars = labelWithVars.replace(/\{\{razaoSocial\}\}/g, company.razao_social || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{nomeFantasia\}\}/g, company.nome_fantasia || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{cnpj\}\}/g, company.cnpj || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{municipio\}\}/g, company.municipio || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{uf\}\}/g, company.uf || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{situacaoCadastral\}\}/g, company.situacao_cadastral || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{motivoSituacao\}\}/g, company.motivo_situacao_cadastral || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{nomeContador\}\}/g, company.nome_contador || '');
+                                    labelWithVars = labelWithVars.replace(/\{\{inscricaoEstadual\}\}/g, company.inscricao_estadual || '');
+                                    
+                                    let out = `\n${indent}- ${nodeStr} ${labelWithVars}`;
                                     if (edgesMap[nodeId]) {
                                         edgesMap[nodeId].forEach(targetId => {
                                             out += parseNode(targetId, indent + '  ', visited);
