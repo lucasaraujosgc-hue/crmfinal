@@ -26,13 +26,21 @@ export interface CompanyResult {
   inscricaoEstadual: string;
   cnpj: string;
   razaoSocial: string;
-  nomeFantasia?: string; // Adicionado
+  nomeFantasia?: string;
+  unidadeFiscalizacao?: string;
+  logradouro?: string;
+  bairroDistrito?: string;
   municipio: string;
   uf?: string;
+  cep?: string;
   telefone: string | null;
+  email?: string;
+  atividadeEconomicaPrincipal?: string;
+  condicao?: string;
+  formaPagamento?: string;
   wa_id?: string;
   situacaoCadastral: string;
-  dataSituacaoCadastral?: string; // Adicionado
+  dataSituacaoCadastral?: string;
   motivoSituacao: string;
   nomeContador: string | null;
   status: Status;

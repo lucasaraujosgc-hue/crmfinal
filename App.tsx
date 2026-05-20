@@ -87,23 +87,7 @@ const Badge: React.FC<BadgeProps> = ({ children, variant = 'default' }) => {
   );
 };
 
-const StatusBadge = ({ status }: { status: string }) => {
-    const map: Record<string, string> = {
-        'pending': 'bg-slate-100 text-slate-700 border-slate-200',
-        'queued': 'bg-amber-50 text-amber-700 border-amber-200',
-        'sent': 'bg-blue-50 text-blue-700 border-blue-200',
-        'replied': 'bg-purple-50 text-purple-700 border-purple-200',
-        'interested': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        'not_interested': 'bg-rose-50 text-rose-700 border-rose-200',
-        'error': 'bg-rose-100 text-rose-700 border-rose-200',
-        'skipped': 'bg-slate-200 text-slate-600 border-slate-300'
-    };
-    return (
-        <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${map[status] || map['pending']}`}>
-            {status}
-        </span>
-    );
-};
+// Removed StatusBadge as it's not used anymore.
 
 // --- Componentes Funcionais Reutilizáveis ---
 
@@ -163,31 +147,69 @@ const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onR
     </div>
 );
 
+const FilterInput = ({ placeholder, value, onChange }: any) => (
+    <div className="mt-1">
+        <input 
+            type="text" 
+            placeholder={placeholder}
+            className="w-full px-2 py-1 text-xs border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:border-brand-400"
+            value={value || ''}
+            onChange={e => onChange(e.target.value)}
+        />
+    </div>
+);
+
 // Tabela de Empresas Compactada
-const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi, onChat, onViewDetails }: any) => (
+const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi, onChat, onViewDetails, colFilters, setColFilters }: any) => {
+    
+    return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-sm">
                 <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
+                    <tr className="bg-slate-50 border-b border-slate-200 divide-x divide-slate-100">
                         {selectable && (
-                            <th className="px-4 py-3 w-12 text-center">
+                            <th className="px-4 py-3 w-10 text-center align-top">
                                 <input 
                                     type="checkbox" 
-                                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 mt-2"
                                     checked={selectedIds.size > 0 && selectedIds.size === companies.length}
                                     onChange={toggleSelectAll}
                                 />
                             </th>
                         )}
-                        <th className="px-6 py-3 font-semibold text-slate-600 w-[35%]">Empresa / Fiscal</th>
-                        <th className="px-6 py-3 font-semibold text-slate-600 w-[20%]">Status</th>
-                        <th className="px-6 py-3 font-semibold text-slate-600 w-[30%]">Motivo SEFAZ</th>
-                        {onToggleAi && <th className="px-6 py-3 font-semibold text-slate-600 text-center w-[10%]">IA Auto</th>}
-                        {(onChat || onViewDetails) && <th className="px-6 py-3 font-semibold text-slate-600 text-right w-[10%]"></th>}
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[120px]">
+                            Inscrição
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.inscricao} onChange={(v: string) => setColFilters({...colFilters, inscricao: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
+                            CNPJ
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.cnpj} onChange={(v: string) => setColFilters({...colFilters, cnpj: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[200px]">
+                            Razão Social
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.razao} onChange={(v: string) => setColFilters({...colFilters, razao: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
+                            Município
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.municipio} onChange={(v: string) => setColFilters({...colFilters, municipio: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[120px]">
+                            Situação
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.situacao} onChange={(v: string) => setColFilters({...colFilters, situacao: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
+                            Forma de Pagamento
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.pagamento} onChange={(v: string) => setColFilters({...colFilters, pagamento: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[200px]">
+                            Motivo da Situação
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.motivo} onChange={(v: string) => setColFilters({...colFilters, motivo: v})} />}
+                        </th>
+                        {(onChat || onViewDetails || onToggleAi) && <th className="px-4 py-2 font-semibold text-slate-600 align-top w-20"></th>}
                     </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
+                <tbody className="divide-y divide-slate-100">
                     {companies.slice(0, 100).map((lead: CompanyResult) => (
                         <tr key={lead.id} className={`hover:bg-slate-50 transition-colors ${selectedIds?.has(lead.id) ? 'bg-slate-50' : ''}`}>
                             {selectable && (
@@ -200,59 +222,59 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                                     />
                                 </td>
                             )}
-                            <td className="px-6 py-3">
-                                <div className="flex items-center gap-3">
-                                    <div>
-                                        <p className="font-medium text-slate-900 truncate max-w-[280px]" title={lead.razaoSocial}>{lead.razaoSocial}</p>
-                                        <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
-                                            <span className="font-mono">{lead.cnpj}</span>
-                                            <span>&bull;</span>
-                                            <span>{lead.municipio} - {lead.uf}</span>
-                                        </div>
-                                    </div>
-                                </div>
+                            <td className="px-4 py-3 font-mono text-slate-700">{lead.inscricaoEstadual}</td>
+                            <td className="px-4 py-3 font-mono text-slate-700">{lead.cnpj}</td>
+                            <td className="px-4 py-3">
+                                <p className="font-medium text-slate-900 truncate max-w-[200px]" title={lead.razaoSocial}>{lead.razaoSocial}</p>
                             </td>
-                            <td className="px-6 py-3">
-                                <div className="flex flex-col gap-1.5 items-start">
-                                    <Badge variant={lead.situacaoCadastral?.includes('ATIVA') ? 'success' : 'danger'}>{lead.situacaoCadastral}</Badge>
-                                    <StatusBadge status={lead.campaignStatus} />
-                                </div>
+                            <td className="px-4 py-3 text-slate-700">{lead.municipio}</td>
+                            <td className="px-4 py-3">
+                                <Badge variant={lead.situacaoCadastral?.includes('ATIVA') ? 'success' : 'danger'}>{lead.situacaoCadastral}</Badge>
                             </td>
-                            <td className="px-6 py-3">
+                            <td className="px-4 py-3 text-slate-700">{lead.formaPagamento || '-'}</td>
+                            <td className="px-4 py-3">
                                 <p className="text-xs text-slate-600 line-clamp-2" title={lead.motivoSituacao}>
-                                    {cleanReasonText(lead.motivoSituacao)}
+                                    {cleanReasonText(lead.motivoSituacao) || '-'}
                                 </p>
                             </td>
-                            {onToggleAi && (
-                                <td className="px-6 py-3 text-center">
-                                    <button onClick={() => onToggleAi(lead.id, lead.aiActive)} className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${lead.aiActive ? 'bg-brand-600' : 'bg-slate-200'}`}>
-                                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${lead.aiActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </td>
-                            )}
-                            {(onChat || onViewDetails) && (
-                                <td className="px-6 py-3 text-right">
-                                    <div className="flex justify-end gap-1">
-                                        {onViewDetails && (
-                                            <button onClick={() => onViewDetails(lead)} className="inline-flex items-center justify-center w-8 h-8 rounded-md text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="Detalhes da Empresa">
-                                                <ScrollText size={18} />
-                                            </button>
-                                        )}
-                                        {onChat && (
-                                            <button onClick={() => onChat(lead)} className="inline-flex items-center justify-center w-8 h-8 rounded-md text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="Abrir Chat WhatsApp">
-                                                <MessageCircle size={18} />
-                                            </button>
+                            {(onChat || onViewDetails || onToggleAi) && (
+                                <td className="px-4 py-3 text-right">
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex justify-end gap-1">
+                                            {onViewDetails && (
+                                                <button onClick={() => onViewDetails(lead)} className="inline-flex items-center justify-center w-7 h-7 rounded text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="Detalhes da Empresa">
+                                                    <ScrollText size={16} />
+                                                </button>
+                                            )}
+                                            {onChat && (
+                                                <button onClick={() => onChat(lead)} className="inline-flex items-center justify-center w-7 h-7 rounded text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="Abrir Chat WhatsApp">
+                                                    <MessageCircle size={16} />
+                                                </button>
+                                            )}
+                                        </div>
+                                        {onToggleAi && (
+                                            <div className="flex justify-end mt-1" title="IA Automação">
+                                                <button onClick={() => onToggleAi(lead.id, lead.aiActive)} className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${lead.aiActive ? 'bg-brand-600' : 'bg-slate-200'}`}>
+                                                    <span className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${lead.aiActive ? 'translate-x-3' : 'translate-x-0'}`} />
+                                                </button>
+                                            </div>
                                         )}
                                     </div>
                                 </td>
                             )}
                         </tr>
                     ))}
+                    {companies.length === 0 && (
+                        <tr>
+                            <td colSpan={10} className="px-6 py-8 text-center text-slate-500">Nenhum registro encontrado.</td>
+                        </tr>
+                    )}
                 </tbody>
             </table>
         </div>
     </div>
-);
+    );
+};
 
 // Card Kanban Compacto
 interface KanbanCardProps {
@@ -353,6 +375,15 @@ const App: React.FC = () => {
   });
 
   const [isCampaignFlowEditorOpen, setIsCampaignFlowEditorOpen] = useState(false);
+  const [colFilters, setColFilters] = useState({
+      inscricao: '',
+      cnpj: '',
+      razao: '',
+      municipio: '',
+      situacao: '',
+      pagamento: '',
+      motivo: ''
+  });
 
   // AI & Knowledge
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
@@ -585,9 +616,18 @@ const App: React.FC = () => {
       const waMatch = filters.statusWa === 'all' ? true : c.campaignStatus === filters.statusWa;
       const phoneMatch = filters.hasPhone === 'all' ? true : (filters.hasPhone === 'yes' ? !!c.telefone : !c.telefone);
       const accMatch = filters.hasAccountant === 'all' ? true : (filters.hasAccountant === 'yes' ? !!c.nomeContador : !c.nomeContador);
-      return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch && accMatch;
+      
+      const fInscricao = !colFilters.inscricao || c.inscricaoEstadual?.toLowerCase().includes(colFilters.inscricao.toLowerCase());
+      const fCnpj = !colFilters.cnpj || c.cnpj?.includes(colFilters.cnpj);
+      const fRazao = !colFilters.razao || c.razaoSocial?.toLowerCase().includes(colFilters.razao.toLowerCase());
+      const fMunicipio = !colFilters.municipio || c.municipio?.toLowerCase().includes(colFilters.municipio.toLowerCase());
+      const fSituacao = !colFilters.situacao || c.situacaoCadastral?.toLowerCase().includes(colFilters.situacao.toLowerCase());
+      const fPagamento = !colFilters.pagamento || c.formaPagamento?.toLowerCase().includes(colFilters.pagamento.toLowerCase());
+      const fMotivo = !colFilters.motivo || c.motivoSituacao?.toLowerCase().includes(colFilters.motivo.toLowerCase());
+
+      return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch && accMatch && fInscricao && fCnpj && fRazao && fMunicipio && fSituacao && fPagamento && fMotivo;
     });
-  }, [companies, filters]);
+  }, [companies, filters, colFilters]);
 
   const toggleSelection = (id: string) => {
     const newSet = new Set(selectedIds);
@@ -896,6 +936,8 @@ const App: React.FC = () => {
                                                 toggleSelection={toggleSelection} 
                                                 toggleSelectAll={toggleSelectAll} 
                                                 selectable={true} 
+                                                colFilters={colFilters}
+                                                setColFilters={setColFilters}
                                             />
                                          </div>
                                      </div>
@@ -976,6 +1018,8 @@ const App: React.FC = () => {
                     onToggleAi={toggleLeadAI}
                     onChat={(lead: CompanyResult) => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || (lead.telefone?.replace(/\D/g, '') + '@c.us')); }}
                     onViewDetails={setViewDetailsLead}
+                    colFilters={colFilters}
+                    setColFilters={setColFilters}
                 />
             </div>
           )}

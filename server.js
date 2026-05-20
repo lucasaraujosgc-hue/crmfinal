@@ -644,40 +644,50 @@ async function processPDFAndScrape(filepath, processId, filename) {
                 const html = await page.content();
                 const $ = cheerio.load(html);
                 
-                const scrapeField = (label) => {
+                const scrapeField = (labels) => {
                     let val = null;
+                    const labelList = Array.isArray(labels) ? labels : [labels];
                     $('b').each((_, el) => {
                         if (val) return;
-                        if ($(el).text().includes(label)) {
-                            let textNode = $(el)[0].nextSibling;
-                            let extracted = textNode ? textNode.nodeValue : null;
-                            if (extracted) {
-                                let currVal = extracted.replace(/\xA0|&nbsp;/g, ' ').trim();
-                                if (currVal !== '' && currVal !== '()') {
-                                    val = currVal;
+                        const elText = $(el).text();
+                        for (const label of labelList) {
+                            if (elText.includes(label)) {
+                                let textNode = $(el)[0].nextSibling;
+                                let extracted = textNode ? textNode.nodeValue : null;
+                                if (extracted) {
+                                    let currVal = extracted.replace(/\xA0|&nbsp;/g, ' ').trim();
+                                    if (currVal !== '' && currVal !== '()') {
+                                        val = currVal;
+                                    }
                                 }
+                                break;
                             }
                         }
                     });
                     return val;
                 };
 
-                let razaoSocial = scrapeField('Razão Social:');
+                let razaoSocial = scrapeField(['Razão Social:', 'Raz&atilde;o Social:']);
                 let nomeFantasia = scrapeField('Nome Fantasia:');
                 let cnpj = scrapeField('CNPJ:');
                 let uf = scrapeField('UF:');
-                let municipio = scrapeField('Município:');
+                let municipio = scrapeField(['Município:', 'Munic&iacute;pio:']);
                 let logradouro = scrapeField('Logradouro:');
+                let bairroDistrito = scrapeField('Bairro/Distrito:');
+                let cep = scrapeField('CEP:');
                 let telefone = scrapeField('Telefone:');
                 let email = scrapeField('E-mail:');
-                let situacaoCadastral = scrapeField('Situação Cadastral Vigente:');
-                let dataSituacaoCadastral = scrapeField('Data desta Situação Cadastral:');
-                let motivoSituacao = scrapeField('Motivo desta Situação Cadastral:');
+                let unidadeFiscalizacao = scrapeField(['Unidade de Fiscalização:', 'Unidade de Fiscaliza&ccedil;&atilde;o:']);
+                let condicao = scrapeField(['Condição:', 'Condi&ccedil;&atilde;o:']);
+                let formaPagamento = scrapeField('Forma de pagamento:');
+                let situacaoCadastral = scrapeField(['Situação Cadastral Vigente:', 'Situa&ccedil;&atilde;o Cadastral Vigente:']);
+                let dataSituacaoCadastral = scrapeField(['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:']);
+                let motivoSituacao = scrapeField(['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:']);
                 let nomeContador = scrapeField('Nome:'); // do contador
                 
                 let atividade = null;
                 $('b').each((_, el) => {
-                    if ($(el).text().includes('Atividade Econômica')) {
+                    if ($(el).text().includes('Atividade Econômica') || $(el).text().includes('Atividade Econ&ocirc;mica')) {
                         const trPai = $(el).closest('tr');
                         if (trPai.length && trPai.next().length) {
                            atividade = trPai.next().text().replace(/\xA0|&nbsp;/g, ' ').trim();
@@ -687,10 +697,10 @@ async function processPDFAndScrape(filepath, processId, filename) {
 
                 if (razaoSocial) {
                     db.run(`INSERT INTO resultado 
-                    (consulta_id, inscricao_estadual, cnpj, razao_social, nome_fantasia, municipio, uf, logradouro, telefone, email, 
-                    atividade_economica_principal, situacao_cadastral, data_situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`,
-                     [processId, ie, cnpj, razaoSocial, nomeFantasia, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador]);
+                    (consulta_id, inscricao_estadual, cnpj, razao_social, nome_fantasia, unidade_fiscalizacao, municipio, uf, cep, bairro_distrito, logradouro, telefone, email, 
+                    atividade_economica_principal, condicao, forma_pagamento, situacao_cadastral, data_situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`,
+                     [processId, ie, cnpj, razaoSocial, nomeFantasia, unidadeFiscalizacao, municipio, uf, cep, bairroDistrito, logradouro, telefone, email, atividade, condicao, formaPagamento, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador]);
                 } else {
                     db.run(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Não encontrado')`, [processId, ie]);
                 }
@@ -790,40 +800,50 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
                 const html = await page.content();
                 const $ = cheerio.load(html);
                 
-                const scrapeField = (label) => {
+                const scrapeField = (labels) => {
                     let val = null;
+                    const labelList = Array.isArray(labels) ? labels : [labels];
                     $('b').each((_, el) => {
                         if (val) return;
-                        if ($(el).text().includes(label)) {
-                            let textNode = $(el)[0].nextSibling;
-                            let extracted = textNode ? textNode.nodeValue : null;
-                            if (extracted) {
-                                let currVal = extracted.replace(/\xA0|&nbsp;/g, ' ').trim();
-                                if (currVal !== '' && currVal !== '()') {
-                                    val = currVal;
+                        const elText = $(el).text();
+                        for (const label of labelList) {
+                            if (elText.includes(label)) {
+                                let textNode = $(el)[0].nextSibling;
+                                let extracted = textNode ? textNode.nodeValue : null;
+                                if (extracted) {
+                                    let currVal = extracted.replace(/\xA0|&nbsp;/g, ' ').trim();
+                                    if (currVal !== '' && currVal !== '()') {
+                                        val = currVal;
+                                    }
                                 }
+                                break;
                             }
                         }
                     });
                     return val;
                 };
 
-                let razaoSocial = scrapeField('Razão Social:');
+                let razaoSocial = scrapeField(['Razão Social:', 'Raz&atilde;o Social:']);
                 let nomeFantasia = scrapeField('Nome Fantasia:');
                 let cnpj = scrapeField('CNPJ:');
                 let uf = scrapeField('UF:');
-                let municipio = scrapeField('Município:');
+                let municipio = scrapeField(['Município:', 'Munic&iacute;pio:']);
                 let logradouro = scrapeField('Logradouro:');
+                let bairroDistrito = scrapeField('Bairro/Distrito:');
+                let cep = scrapeField('CEP:');
                 let telefone = scrapeField('Telefone:');
                 let email = scrapeField('E-mail:');
-                let situacaoCadastral = scrapeField('Situação Cadastral Vigente:');
-                let dataSituacaoCadastral = scrapeField('Data desta Situação Cadastral:');
-                let motivoSituacao = scrapeField('Motivo desta Situação Cadastral:');
+                let unidadeFiscalizacao = scrapeField(['Unidade de Fiscalização:', 'Unidade de Fiscaliza&ccedil;&atilde;o:']);
+                let condicao = scrapeField(['Condição:', 'Condi&ccedil;&atilde;o:']);
+                let formaPagamento = scrapeField('Forma de pagamento:');
+                let situacaoCadastral = scrapeField(['Situação Cadastral Vigente:', 'Situa&ccedil;&atilde;o Cadastral Vigente:']);
+                let dataSituacaoCadastral = scrapeField(['Data desta Situação Cadastral:', 'Data desta Situa&ccedil;&atilde;o Cadastral:']);
+                let motivoSituacao = scrapeField(['Motivo desta Situação Cadastral:', 'Motivo desta Situa&ccedil;&atilde;o Cadastral:']);
                 let nomeContador = scrapeField('Nome:');
                 
                 let atividade = null;
                 $('b').each((_, el) => {
-                    if ($(el).text().includes('Atividade Econômica')) {
+                    if ($(el).text().includes('Atividade Econômica') || $(el).text().includes('Atividade Econ&ocirc;mica')) {
                         const trPai = $(el).closest('tr');
                         if (trPai.length && trPai.next().length) {
                            atividade = trPai.next().text().replace(/\xA0|&nbsp;/g, ' ').trim();
@@ -833,10 +853,10 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
 
                 if (razaoSocial) {
                     db.run(`UPDATE resultado SET 
-                    cnpj = ?, razao_social = ?, nome_fantasia = ?, municipio = ?, uf = ?, logradouro = ?, telefone = ?, email = ?, 
-                    atividade_economica_principal = ?, situacao_cadastral = ?, data_situacao_cadastral = ?, motivo_situacao_cadastral = ?, nome_contador = ?, status = 'Sucesso' 
+                    cnpj = ?, razao_social = ?, nome_fantasia = ?, unidade_fiscalizacao = ?, municipio = ?, uf = ?, cep = ?, bairro_distrito = ?, logradouro = ?, telefone = ?, email = ?, 
+                    atividade_economica_principal = ?, condicao = ?, forma_pagamento = ?, situacao_cadastral = ?, data_situacao_cadastral = ?, motivo_situacao_cadastral = ?, nome_contador = ?, status = 'Sucesso' 
                     WHERE consulta_id = ? AND inscricao_estadual = ?`,
-                     [cnpj, razaoSocial, nomeFantasia, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador, consultaId, ie]);
+                     [cnpj, razaoSocial, nomeFantasia, unidadeFiscalizacao, municipio, uf, cep, bairroDistrito, logradouro, telefone, email, atividade, condicao, formaPagamento, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador, consultaId, ie]);
                 } else {
                     db.run(`UPDATE resultado SET status = 'Erro: Não encontrado' WHERE consulta_id = ? AND inscricao_estadual = ?`, [consultaId, ie]);
                 }
@@ -897,7 +917,25 @@ app.get('/api/unique-filters', (req, res) => {
 app.get('/get-all-results', (req, res) => {
   db.all('SELECT * FROM resultado ORDER BY id DESC', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ ...r, id: r.id.toString(), inscricaoEstadual: r.inscricao_estadual, razaoSocial: r.razao_social, nomeFantasia: r.nome_fantasia, situacaoCadastral: r.situacao_cadastral, dataSituacaoCadastral: r.data_situacao_cadastral, motivoSituacao: r.motivo_situacao_cadastral, campaignStatus: r.campaign_status || 'pending', aiActive: r.ai_active === 1, wa_id: r.wa_id })));
+    res.json(rows.map(r => ({ 
+        ...r, 
+        id: r.id.toString(), 
+        inscricaoEstadual: r.inscricao_estadual, 
+        razaoSocial: r.razao_social, 
+        nomeFantasia: r.nome_fantasia, 
+        unidadeFiscalizacao: r.unidade_fiscalizacao,
+        bairroDistrito: r.bairro_distrito,
+        email: r.email,
+        atividadeEconomicaPrincipal: r.atividade_economica_principal,
+        condicao: r.condicao,
+        formaPagamento: r.forma_pagamento,
+        situacaoCadastral: r.situacao_cadastral, 
+        dataSituacaoCadastral: r.data_situacao_cadastral, 
+        motivoSituacao: r.motivo_situacao_cadastral, 
+        campaignStatus: r.campaign_status || 'pending', 
+        aiActive: r.ai_active === 1, 
+        wa_id: r.wa_id 
+    })));
   });
 });
 
