@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Upload, MessageCircle, Bot, Settings, Menu, FileSpreadsheet, Search,
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
-  User, X, Rocket, Trello, Edit,
+  User, X, Rocket, Edit,
   Smile, Check, Cpu, Terminal,
   Activity, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode, Calculator
 } from 'lucide-react';
@@ -628,7 +628,6 @@ const App: React.FC = () => {
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {[
             { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-            { id: 'kanban', icon: Trello, label: 'Kanban' },
             { id: 'import', icon: Upload, label: 'Importar PDF' },
             { id: 'campaigns', icon: Rocket, label: 'Campanhas' },
             { id: 'leads', icon: FileSpreadsheet, label: 'Base de Leads' },
@@ -692,25 +691,54 @@ const App: React.FC = () => {
           
           {/* DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <div className="max-w-6xl mx-auto space-y-6 pb-12">
-              <h2 className="text-xl font-semibold text-slate-800 mb-6">Visão Geral do Sistema</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[
-                  { label: 'Total na Base', value: stats.total, icon: FileSpreadsheet, color: 'text-brand-600', bg: 'bg-brand-50' },
-                  { label: 'Sucesso Sefaz', value: stats.success, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                  { label: 'Erros Identificados', value: stats.errors, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-50' },
-                  { label: 'Campanhas ATIVAS', value: campaigns.length, icon: Rocket, color: 'text-amber-600', bg: 'bg-amber-50' },
-                ].map((stat, i) => (
-                  <div key={i} className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
-                      <h3 className="text-2xl font-bold text-slate-900">{stat.value}</h3>
+            <div className="max-w-7xl mx-auto space-y-8 pb-12">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-800 mb-6">Visão Geral do Sistema</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Total na Base', value: stats.total, icon: FileSpreadsheet, color: 'text-brand-600', bg: 'bg-brand-50' },
+                    { label: 'Sucesso Sefaz', value: stats.success, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                    { label: 'Erros Identificados', value: stats.errors, icon: AlertCircle, color: 'text-rose-600', bg: 'bg-rose-50' },
+                    { label: 'Campanhas ATIVAS', value: campaigns.length, icon: Rocket, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  ].map((stat, i) => (
+                    <div key={i} className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-slate-500 mb-1">{stat.label}</p>
+                        <h3 className="text-2xl font-bold text-slate-900">{stat.value}</h3>
+                      </div>
+                      <div className={`p-2.5 rounded-md ${stat.bg} ${stat.color}`}>
+                        <stat.icon size={20} />
+                      </div>
                     </div>
-                    <div className={`p-2.5 rounded-md ${stat.bg} ${stat.color}`}>
-                      <stat.icon size={20} />
-                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* KANBAN SECTION NO DASHBOARD */}
+              <div>
+                  <div className="flex justify-between items-center mb-6">
+                      <h2 className="text-xl font-semibold text-slate-800">Funil de Vendas (Kanban)</h2>
                   </div>
-                ))}
+                  <div className="h-[600px] flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                      {['pending', 'sent', 'replied', 'interested', 'not_interested'].map((status) => (
+                          <div key={status} className="w-[320px] shrink-0 flex flex-col h-full bg-slate-100 rounded-lg p-3">
+                              <div className="flex justify-between items-center mb-4 px-1 text-slate-700">
+                                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                                      <div className={`w-2 h-2 rounded-full ${status === 'pending' ? 'bg-slate-400' : status === 'interested' ? 'bg-emerald-500' : 'bg-brand-500'}`}></div>
+                                      {status === 'pending' ? 'Prospecção' : status === 'sent' ? 'Contatados' : status === 'replied' ? 'Engajamento' : status === 'interested' ? 'Quentes' : 'Perdidos'}
+                                  </h3>
+                                  <span className="bg-slate-200 px-2 py-0.5 rounded text-xs font-medium">
+                                      {companies.filter(c => c.campaignStatus === status).length}
+                                  </span>
+                              </div>
+                              <div className="flex-1 space-y-3 overflow-y-auto custom-scrollbar">
+                                  {companies.filter(c => c.campaignStatus === status).map(lead => (
+                                      <KanbanCard key={lead.id} company={lead} onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.telefone?.replace(/\D/g, '') + '@c.us'); }} />
+                                  ))}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
               </div>
             </div>
           )}
@@ -938,30 +966,6 @@ const App: React.FC = () => {
                     onToggleAi={toggleLeadAI}
                     onChat={(lead: CompanyResult) => { setActiveTab('whatsapp'); setActiveChat(lead.telefone?.replace(/\D/g, '') + '@c.us'); }}
                 />
-            </div>
-          )}
-
-          {/* KANBAN TAB */}
-          {activeTab === 'kanban' && (
-            <div className="h-full flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
-                {['pending', 'sent', 'replied', 'interested', 'not_interested'].map((status) => (
-                    <div key={status} className="w-[320px] shrink-0 flex flex-col h-full bg-slate-100 rounded-lg p-3">
-                        <div className="flex justify-between items-center mb-4 px-1 text-slate-700">
-                            <h3 className="font-semibold text-sm flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${status === 'pending' ? 'bg-slate-400' : status === 'interested' ? 'bg-emerald-500' : 'bg-brand-500'}`}></div>
-                                {status === 'pending' ? 'Prospecção' : status === 'sent' ? 'Contatados' : status === 'replied' ? 'Engajamento' : status === 'interested' ? 'Quentes' : 'Perdidos'}
-                            </h3>
-                            <span className="bg-slate-200 px-2 py-0.5 rounded text-xs font-medium">
-                                {companies.filter(c => c.campaignStatus === status).length}
-                            </span>
-                        </div>
-                        <div className="flex-1 space-y-3 overflow-y-auto custom-scrollbar">
-                            {companies.filter(c => c.campaignStatus === status).map(lead => (
-                                <KanbanCard key={lead.id} company={lead} onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.telefone?.replace(/\D/g, '') + '@c.us'); }} />
-                            ))}
-                        </div>
-                    </div>
-                ))}
             </div>
           )}
 
