@@ -1224,6 +1224,28 @@ app.post('/api/whatsapp/send', async (req, res) => {
 
 app.get('/api/whatsapp/status', (req, res) => res.json({ status: clientReady ? 'connected' : 'disconnected', qr: qrCodeData }));
 
+app.post('/api/whatsapp/reset', async (req, res) => {
+    try {
+        logSystem('info', 'whatsapp', 'Reset de sessão solicitado pelo usuário');
+        clientReady = false;
+        qrCodeData = null;
+        try { await client.logout(); } catch (_) {}
+        try { await client.destroy(); } catch (_) {}
+        const fs2 = (await import('fs')).default;
+        if (fs2.existsSync(AUTH_DIR)) {
+            fs2.rmSync(AUTH_DIR, { recursive: true, force: true });
+            fs2.mkdirSync(AUTH_DIR, { recursive: true });
+        }
+        setTimeout(() => {
+            client.initialize().catch(e => logSystem('error', 'whatsapp', 'Erro ao reinicializar após reset', { err: e.message }));
+        }, 2000);
+        res.json({ success: true });
+    } catch (err) {
+        logSystem('error', 'whatsapp', 'Erro ao resetar sessão WhatsApp', { err: err.message });
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/cleanup', (req, res) => {
     db.run(`DELETE FROM resultado WHERE consulta_id NOT IN (SELECT id FROM consulta)`, (err) => {
         if (err) return res.status(500).json({ error: err.message });

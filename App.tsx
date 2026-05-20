@@ -404,6 +404,7 @@ const App: React.FC = () => {
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [isResettingWa, setIsResettingWa] = useState(false);
   
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
@@ -535,6 +536,22 @@ const App: React.FC = () => {
         fetchMessages(activeChat);
       }
     } catch (e) {}
+  };
+
+  const handleResetWhatsApp = async () => {
+    if (!window.confirm("Isso vai desconectar o WhatsApp e gerar um novo QR Code. Deseja continuar?")) return;
+    setIsResettingWa(true);
+    try {
+      await fetch("/api/whatsapp/reset", { method: "POST" });
+      setWaSession({ status: "disconnected" });
+      setChats([]);
+      setActiveChat(null);
+      setChatMessages([]);
+    } catch (e) {
+      alert("Erro ao resetar conexão.");
+    } finally {
+      setIsResettingWa(false);
+    }
   };
 
   const toggleLeadAI = async (id: string, currentStatus: boolean | undefined) => {
@@ -1446,6 +1463,14 @@ const App: React.FC = () => {
                               <div className={`w-2 h-2 rounded-full ${waSession.status === 'connecting' ? 'bg-amber-400' : 'bg-slate-400'}`}></div>
                               Status: {waSession.status}
                           </div>
+                          <button
+                              onClick={handleResetWhatsApp}
+                              disabled={isResettingWa}
+                              className="mt-4 flex items-center gap-2 mx-auto px-4 py-2 rounded-md text-xs font-medium border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                              {isResettingWa ? "Limpando sessão..." : "Limpar sessão e gerar novo QR"}
+                          </button>
                       </div>
                    </div>
                 ) : (
@@ -1455,7 +1480,7 @@ const App: React.FC = () => {
                 <div className="w-80 flex flex-col bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
                     <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
                         <h3 className="font-semibold text-slate-800 text-sm">Conversas Ativas</h3>
-                        <Badge variant="brand">{chats.length}</Badge>
+                        <div className="flex items-center gap-2"><Badge variant="brand">{chats.length}</Badge><button onClick={handleResetWhatsApp} disabled={isResettingWa} title="Limpar sessão e gerar novo QR" className="p-1.5 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors disabled:opacity-50" ><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button></div>
                     </div>
                     <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-100">
                         {chats.map(chat => (
