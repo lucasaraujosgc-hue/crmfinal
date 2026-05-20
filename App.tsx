@@ -654,10 +654,9 @@ const App: React.FC = () => {
             setSelectedIds(new Set());
           }
       }
-    } catch (e) {}
-  };
-
-  // --- Lógica de Filtros e Seleção ---
+    } catch (e: any) {
+      alert('Erro ao criar campanha: ' + (e?.message || 'Tente novamente.'));
+    }
 
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {
