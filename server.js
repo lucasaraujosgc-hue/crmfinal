@@ -261,19 +261,24 @@ client.on('message', async (msg) => {
     }
 
     const rawSenderPhone = waId.split('@')[0].replace(/\D/g, '');
-    let searchCondition = [];
-    let searchValues = [waId];
-    
-    // Se for lid real q nao mapeou o numero, nao podemos usar last8. Mas vamos tentar.
-    const last8 = rawSenderPhone.length >= 8 ? rawSenderPhone.slice(-8) : rawSenderPhone;
-    
-    if (msg.from.includes('@lid')) {
-        // Se ainda assim for @lid, vamos tentar achar usando o lid que pode ter sido setado no envio
-        searchValues.push(msg.from);
-    }
 
-    db.all(`SELECT * FROM resultado WHERE wa_id = ? OR telefone LIKE ? ${msg.from.includes('@lid') ? 'OR wa_id = ?' : ''}`, 
-           msg.from.includes('@lid') ? [waId, `%${last8}%`, msg.from] : [waId, `%${last8}%`], async (err, rows) => {
+    // Gera variações do número para busca ampla:
+    // Ex: "5571999998888" → também tenta "71999998888", "999998888", últimos 8 dígitos
+    const last8  = rawSenderPhone.length >= 8  ? rawSenderPhone.slice(-8)  : rawSenderPhone;
+    const last10 = rawSenderPhone.length >= 10 ? rawSenderPhone.slice(-10) : rawSenderPhone;
+    const last11 = rawSenderPhone.length >= 11 ? rawSenderPhone.slice(-11) : rawSenderPhone;
+
+    // Monta query que tenta wa_id exato, ou qualquer sufixo relevante no telefone salvo
+    const isLid = msg.from.includes('@lid');
+    const sqlExtra = isLid ? 'OR wa_id = ?' : '';
+    const params = isLid
+        ? [waId, `%${last8}%`, `%${last10}%`, `%${last11}%`, msg.from]
+        : [waId, `%${last8}%`, `%${last10}%`, `%${last11}%`];
+
+    db.all(
+        `SELECT * FROM resultado WHERE wa_id = ? OR telefone LIKE ? OR telefone LIKE ? OR telefone LIKE ? ${sqlExtra}`,
+        params,
+        async (err, rows) => {
             
             if (err) {
                 logSystem('error', 'database', 'Erro ao buscar lead', { error: err.message });
@@ -285,16 +290,21 @@ client.on('message', async (msg) => {
                 return;
             }
 
-            // Filtragem precisa em JavaScript
+            // Filtragem precisa em JavaScript — garante que o match é real e não colisão de sufixo curto
             const company = rows.find(r => {
-                if (r.wa_id === waId || (msg.from.includes('@lid') && r.wa_id === msg.from)) return true;
+                if (r.wa_id === waId || (isLid && r.wa_id === msg.from)) return true;
                 const dbPhone = (r.telefone || '').replace(/\D/g, '');
-                return dbPhone.endsWith(rawSenderPhone) || rawSenderPhone.endsWith(dbPhone);
+                if (!dbPhone) return false;
+                // Aceita se um termina com o outro (cobre variações de DDI/DDD)
+                return dbPhone.endsWith(rawSenderPhone)
+                    || rawSenderPhone.endsWith(dbPhone)
+                    || dbPhone.endsWith(last10)
+                    || dbPhone.endsWith(last11);
             });
 
             if (!company) {
-                 logSystem('ai_skip', 'database', 'Match impreciso de telefone', { phone: rawSenderPhone });
-                 return;
+                logSystem('ai_skip', 'database', 'Match impreciso de telefone — nenhuma variação bateu', { phone: rawSenderPhone, from: msg.from });
+                return;
             }
             
             // Se o msg.from tem @lid e não era o wa_id atual, vamos garantir que o banco salve o lid real que chegou
@@ -868,7 +878,8 @@ async function processPDFAndScrape(filepath, processId, filename) {
 }
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // API Endpoints para Scraping
