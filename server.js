@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
+import { processFlowNode } from './flowEngine.js';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import QRCode from 'qrcode';
@@ -98,6 +99,8 @@ db.serialize(() => {
     FOREIGN KEY(consulta_id) REFERENCES consulta(id),
     FOREIGN KEY(campaign_id) REFERENCES campaign(id)
   )`);
+  db.run(`ALTER TABLE resultado ADD COLUMN current_node_id TEXT`, (err) => {});
+  db.run(`ALTER TABLE resultado ADD COLUMN flow_state TEXT`, (err) => {});
 });
 
 // --- SISTEMA DE LOGS EM MEMÓRIA (RAM) ---
@@ -251,6 +254,60 @@ client.on('message', async (msg) => {
             if (msg.from.includes('@lid') && company.wa_id !== msg.from) {
                 db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [msg.from, company.id]);
                 company.wa_id = msg.from; // Atualiza a variável pra esse fluxo
+            }
+
+            let userMessageBody = msg.body;
+
+            if (msg.hasMedia && (msg.type === 'audio' || msg.type === 'ptt')) {
+                logSystem('info', 'whatsapp', 'Áudio recebido, iniciando transcrição...');
+                try {
+                    const media = await msg.downloadMedia();
+                    if (aiConfig.apiKeys?.groq) {
+                        const groq = new Groq({ apiKey: aiConfig.apiKeys.groq });
+                        // Transformar base64 em arquivo
+                        const tmpPath = path.join(UPLOADS_DIR, `audio_${Date.now()}.${media.mimetype.split('/')[1].split(';')[0] || 'ogg'}`);
+                        fs.writeFileSync(tmpPath, Buffer.from(media.data, 'base64'));
+                        
+                        const transcription = await groq.audio.transcriptions.create({
+                            file: fs.createReadStream(tmpPath),
+                            model: "whisper-large-v3",
+                            prompt: "A audio from a client.",
+                            response_format: "json",
+                            language: "pt",
+                        });
+                        userMessageBody = `[O USUÁRIO LHE ENVIOU UM ÁUDIO COM A SEGUINTE TRANSCRIÇÃO]: "${transcription.text}"`;
+                        fs.unlinkSync(tmpPath); // Clean up
+                    } else {
+                        userMessageBody = '[Mensagem de Áudio não transcrita por falta de Groq API Key]';
+                        logSystem('warning', 'whatsapp', 'Chave GRoq não configurada para transcrever áudio.');
+                    }
+                } catch (e) {
+                    logSystem('error', 'whatsapp', 'Erro ao processar áudio', { error: e.message });
+                    userMessageBody = '[Erro ao processar áudio]';
+                }
+            }
+
+            // FLOW BUILDER LOGIC
+            if (company.campaign_status === 'flow_active' && company.current_node_id && company.campaign_id) {
+                db.get('SELECT * FROM campaign WHERE id = ?', [company.campaign_id], (err, campaignData) => {
+                    if (err || !campaignData) return;
+                    
+                    const callbacks = {
+                        sendMessage: (to, m) => client.sendMessage(to, m),
+                        sendMedia: async (to, mediaBase64, caption) => {
+                            const pkgMedia = await import('whatsapp-web.js');
+                            const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
+                            const m = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
+                            await client.sendMessage(to, m, { caption });
+                        },
+                        askAi: async (prompt) => askAI(prompt, aiConfig),
+                        log: logSystem
+                    };
+                    
+                    processFlowNode(callbacks, db, company, campaignData, company.current_node_id, userMessageBody)
+                        .catch(e => logSystem('error', 'flow_engine', 'Erro no roteamento de fluxo da IA', { error: e.message }));
+                });
+                return;
             }
 
             if (company.ai_active !== 1) {
@@ -534,80 +591,116 @@ client.initialize().catch(() => {});
 
 // Lógica de Envio de Campanhas
 function startCampaignSending(campaignId, message) {
-    const processQueue = () => {
-        db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND (campaign_status = 'queued' OR campaign_status = 'pending') LIMIT 1`, [campaignId], async (err, lead) => {
-            if (err || !lead) {
-                logSystem('info', 'campaign', `Fila da campanha ${campaignId} finalizada.`);
-                return;
-            }
-            if (!clientReady) return setTimeout(processQueue, 5000);
+    db.get('SELECT * FROM campaign WHERE id = ?', [campaignId], (err, campaignData) => {
+        if (err || !campaignData) return;
+        
+        let hasCustomFlow = false;
+        try {
+            const nodes = JSON.parse(campaignData.flow_nodes);
+            hasCustomFlow = Array.isArray(nodes) && nodes.length > 0;
+        } catch (e) {}
 
-            if (!lead.telefone) {
-                logSystem('error', 'campaign', `Telefone inválido para lead ${lead.id}`);
-                db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
-                return;
-            }
-
-            try {
-                const cleanPhone = lead.telefone.replace(/\D/g, '');
-                if (cleanPhone.length < 10) {
-                     logSystem('error', 'campaign', `Telefone muito curto para lead ${lead.id} (${lead.telefone})`);
-                     db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
-                     return;
+        const processQueue = () => {
+            db.get(`SELECT * FROM resultado WHERE campaign_id = ? AND (campaign_status = 'queued' OR campaign_status = 'pending') LIMIT 1`, [campaignId], async (err, lead) => {
+                if (err || !lead) {
+                    logSystem('info', 'campaign', `Fila da campanha ${campaignId} finalizada.`);
+                    return;
                 }
-                const target = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
-                const actualTarget = target + "@c.us";
-                
-                let finalMessage = message || '';
-                finalMessage = finalMessage.replace(/\{\{razaoSocial\}\}/g, lead.razao_social || '');
-                finalMessage = finalMessage.replace(/\{\{nomeFantasia\}\}/g, lead.nome_fantasia || '');
-                finalMessage = finalMessage.replace(/\{\{cnpj\}\}/g, lead.cnpj || '');
-                finalMessage = finalMessage.replace(/\{\{municipio\}\}/g, lead.municipio || '');
-                finalMessage = finalMessage.replace(/\{\{uf\}\}/g, lead.uf || '');
-                finalMessage = finalMessage.replace(/\{\{situacaoCadastral\}\}/g, lead.situacao_cadastral || '');
-                finalMessage = finalMessage.replace(/\{\{motivoSituacao\}\}/g, lead.motivo_situacao_cadastral || '');
-                finalMessage = finalMessage.replace(/\{\{nomeContador\}\}/g, lead.nome_contador || '');
-                finalMessage = finalMessage.replace(/\{\{inscricaoEstadual\}\}/g, lead.inscricao_estadual || '');
+                if (!clientReady) return setTimeout(processQueue, 5000);
 
-                if (!finalMessage.trim()) {
-                    logSystem('error', 'campaign', `Mensagem vazia para lead ${lead.id}`);
+                if (!lead.telefone) {
+                    logSystem('error', 'campaign', `Telefone inválido para lead ${lead.id}`);
                     db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
                     return;
                 }
-                
-                const numberId = await client.getNumberId(actualTarget);
-                if (!numberId) {
-                    logSystem('error', 'campaign', `Número não possui WhatsApp: ${actualTarget}`);
-                    db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 5000));
-                    return;
-                }
 
-                const contact = await client.getContactById(numberId._serialized);
-                const finalWaId = contact?.id?._serialized || numberId._serialized;
-                let storeWaId = finalWaId;
-                
                 try {
-                    const lidMap = await client.getContactLidAndPhone([finalWaId]);
-                    if (lidMap && lidMap[0] && lidMap[0].lid) {
-                        storeWaId = lidMap[0].lid; // Store the LID for better incoming mapping
+                    const cleanPhone = lead.telefone.replace(/\D/g, '');
+                    if (cleanPhone.length < 10) {
+                         logSystem('error', 'campaign', `Telefone muito curto para lead ${lead.id} (${lead.telefone})`);
+                         db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
+                         return;
                     }
-                } catch (err) {}
+                    const target = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+                    const actualTarget = target + "@c.us";
+                    
+                    const numberId = await client.getNumberId(actualTarget);
+                    if (!numberId) {
+                        logSystem('error', 'campaign', `Número não possui WhatsApp: ${actualTarget}`);
+                        db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 5000));
+                        return;
+                    }
 
-                const sentMsg = await client.sendMessage(finalWaId, finalMessage);
-                
-                logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: finalWaId, expectedLid: storeWaId !== finalWaId ? storeWaId : undefined });
+                    const contact = await client.getContactById(numberId._serialized);
+                    const finalWaId = contact?.id?._serialized || numberId._serialized;
+                    let storeWaId = finalWaId;
+                    
+                    try {
+                        const lidMap = await client.getContactLidAndPhone([finalWaId]);
+                        if (lidMap && lidMap[0] && lidMap[0].lid) {
+                            storeWaId = lidMap[0].lid; // Store the LID for better incoming mapping
+                        }
+                    } catch (err) {}
 
-                db.run(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ?, wa_id = ? WHERE id = ?`, 
-                       [new Date().toISOString(), storeWaId, lead.id], () => {
-                    setTimeout(processQueue, Math.floor(Math.random() * 15000) + 15000);
-                });
-            } catch (e) {
-                logSystem('error', 'campaign', `Erro envio campanha para ${lead.telefone}`, { error: e.message });
-                db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 3000));
-            }
-        });
-    };
-    processQueue();
+                    if (hasCustomFlow) {
+                        const callbacks = {
+                            sendMessage: (to, msg) => client.sendMessage(to, msg),
+                            sendMedia: async (to, mediaBase64, caption) => {
+                                const pkgMedia = await import('whatsapp-web.js');
+                                const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
+                                const m = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
+                                await client.sendMessage(to, m, { caption });
+                            },
+                            askAi: async (prompt) => askAI(prompt, aiConfig),
+                            log: logSystem
+                        };
+                        
+                        logSystem('info', 'campaign', `Iniciando Flow Builder para lead ${lead.razao_social}`, { phone: storeWaId });
+                        db.run(`UPDATE resultado SET campaign_status = 'flow_active', last_contacted = ?, wa_id = ? WHERE id = ?`, 
+                               [new Date().toISOString(), storeWaId, lead.id], () => {
+                            
+                            processFlowNode(callbacks, db, { ...lead, wa_id: storeWaId }, campaignData, null, null).catch(e => {
+                                logSystem('error', 'campaign', `Erro no Flow para ${lead.telefone}`, { error: e.message });
+                            });
+                            
+                            setTimeout(processQueue, Math.floor(Math.random() * 15000) + 15000);
+                        });
+                    } else {
+                        // Fallback simple message logic
+                        let finalMessage = message || '';
+                        finalMessage = finalMessage.replace(/\{\{razaoSocial\}\}/g, lead.razao_social || '');
+                        finalMessage = finalMessage.replace(/\{\{nomeFantasia\}\}/g, lead.nome_fantasia || '');
+                        finalMessage = finalMessage.replace(/\{\{cnpj\}\}/g, lead.cnpj || '');
+                        finalMessage = finalMessage.replace(/\{\{municipio\}\}/g, lead.municipio || '');
+                        finalMessage = finalMessage.replace(/\{\{uf\}\}/g, lead.uf || '');
+                        finalMessage = finalMessage.replace(/\{\{situacaoCadastral\}\}/g, lead.situacao_cadastral || '');
+                        finalMessage = finalMessage.replace(/\{\{motivoSituacao\}\}/g, lead.motivo_situacao_cadastral || '');
+                        finalMessage = finalMessage.replace(/\{\{nomeContador\}\}/g, lead.nome_contador || '');
+                        finalMessage = finalMessage.replace(/\{\{inscricaoEstadual\}\}/g, lead.inscricao_estadual || '');
+
+                        if (!finalMessage.trim()) {
+                            logSystem('error', 'campaign', `Mensagem vazia para lead ${lead.id}`);
+                            db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 0));
+                            return;
+                        }
+
+                        const sentMsg = await client.sendMessage(finalWaId, finalMessage);
+                        
+                        logSystem('msg_out', 'campaign', `Campanha enviada para ${lead.razao_social}`, { phone: finalWaId, expectedLid: storeWaId !== finalWaId ? storeWaId : undefined });
+
+                        db.run(`UPDATE resultado SET campaign_status = 'sent', last_contacted = ?, wa_id = ? WHERE id = ?`, 
+                               [new Date().toISOString(), storeWaId, lead.id], () => {
+                            setTimeout(processQueue, Math.floor(Math.random() * 15000) + 15000);
+                        });
+                    }
+                } catch (e) {
+                    logSystem('error', 'campaign', `Erro envio campanha para ${lead.telefone}`, { error: e.message });
+                    db.run(`UPDATE resultado SET campaign_status = 'error' WHERE id = ?`, [lead.id], () => setTimeout(processQueue, 3000));
+                }
+            });
+        };
+        processQueue();
+    });
 }
 
 // --- PDF AND SCRAPING PROCESSING LOGIC ---
@@ -980,6 +1073,34 @@ app.get('/api/campaigns', (req, res) => {
     });
 });
 
+app.delete('/api/campaigns/:id', (req, res) => {
+    db.run('DELETE FROM campaign WHERE id = ?', [req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+app.put('/api/campaigns/:id', (req, res) => {
+    const { name, description, initialMessage, aiPersona, leads, flowNodes, flowEdges } = req.body;
+    
+    const flowNodesStr = flowNodes ? JSON.stringify(flowNodes) : null;
+    const flowEdgesStr = flowEdges ? JSON.stringify(flowEdges) : null;
+
+    db.run(`UPDATE campaign 
+            SET name = ?, description = ?, initial_message = ?, ai_persona = ?, flow_nodes = ?, flow_edges = ? 
+            WHERE id = ?`,
+        [name, description, initialMessage, aiPersona, flowNodesStr, flowEdgesStr, req.params.id],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            // To update leads we would probably clear and re-link, but let's assume editing campaign fields is enough for now.
+            // If we need to alter leads, we update outcome table. But normally you don't resend to old leads that were already processed.
+            // So we just update the metadata and the flow.
+            res.json({ success: true });
+        }
+    );
+});
+
 app.post('/api/campaigns', (req, res) => {
     const { name, description, initialMessage, aiPersona, leads, flowNodes, flowEdges } = req.body;
     if (!leads || leads.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado' });
@@ -1086,4 +1207,4 @@ app.post('/api/cleanup', (req, res) => {
     });
 });
 
-app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`Server running at http://0.0.0.0:${port}`));

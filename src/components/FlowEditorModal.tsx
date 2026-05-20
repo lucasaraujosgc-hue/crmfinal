@@ -8,13 +8,15 @@ const nodeTypesConfig = [
   { type: 'media', label: 'Mídia (Img/Áudio)', icon: Image, color: 'border-pink-400 bg-pink-50 text-pink-700' },
   { type: 'interval', label: 'Intervalo', icon: Clock, color: 'border-amber-400 bg-amber-50 text-amber-700' },
   { type: 'menu', label: 'Menu', icon: List, color: 'border-purple-400 bg-purple-50 text-purple-700' },
-  { type: 'ai', label: 'Ação IA', icon: Bot, color: 'border-emerald-400 bg-emerald-50 text-emerald-700' },
+  { type: 'ai', label: 'Análise IA (Roteador)', icon: Bot, color: 'border-emerald-400 bg-emerald-50 text-emerald-700' },
+  { type: 'ai_generate', label: 'Gerar Resposta IA', icon: Bot, color: 'border-teal-400 bg-teal-50 text-teal-700' },
   { type: 'ticket', label: 'Ticket', icon: FileText, color: 'border-indigo-400 bg-indigo-50 text-indigo-700' }
 ];
 
 const FlowNode = ({ data, type, isConnectable }: any) => {
     const config = nodeTypesConfig.find(c => c.type === type) || nodeTypesConfig[0];
     const Icon = config.icon;
+    const hasOptions = type === 'menu' || type === 'ai';
     
     return (
         <div className={`shadow-sm rounded-lg bg-white border border-slate-300 ${config.color.split(' ')[0]} min-w-[140px] max-w-[170px] text-slate-800`}>
@@ -40,12 +42,18 @@ const FlowNode = ({ data, type, isConnectable }: any) => {
                         <img src={data.mediaData} alt="upload" className="max-w-full max-h-full object-cover" />
                     </div>
                 )}
+
+                {type === 'interval' && (
+                    <div className="text-[10px] font-semibold text-center text-amber-700 mb-1">
+                        Aguardar {data.seconds || 5}s
+                    </div>
+                )}
                 
                 {data.label && (
                     <div className="text-[10px] leading-tight font-medium whitespace-pre-wrap break-words">{data.label}</div>
                 )}
 
-                {type === 'menu' && data.options && data.options.length > 0 && (
+                {hasOptions && data.options && data.options.length > 0 && (
                     <div className="mt-1 space-y-0.5">
                         {data.options.map((opt: any, i: number) => (
                             <div key={i} className="text-[9px] bg-slate-50 border border-slate-100 rounded px-1 py-0.5 flex items-center justify-between">
@@ -56,12 +64,12 @@ const FlowNode = ({ data, type, isConnectable }: any) => {
                     </div>
                 )}
             </div>
-            {/* Default Source Handle at bottom, except for menu which might have specific option handles */}
-            {type !== 'menu' && (
+            {/* Default Source Handle at bottom */}
+            {!hasOptions && (
                 <Handle type="source" position={Position.Bottom} isConnectable={isConnectable} className="w-1.5 h-1.5 border border-slate-300 bg-white" />
             )}
-            {type === 'menu' && (
-                <Handle type="source" position={Position.Bottom} id="fallback" className="w-1.5 h-1.5 border border-slate-300 bg-slate-200" />
+            {hasOptions && (
+                <Handle type="source" position={Position.Bottom} id="fallback" className="w-1.5 h-1.5 border border-slate-300 bg-slate-200" title="Fallback / Time-out" />
             )}
         </div>
     );
@@ -73,6 +81,7 @@ const nodeTypes = {
   interval: (props: any) => <FlowNode {...props} type="interval" />,
   menu: (props: any) => <FlowNode {...props} type="menu" />,
   ai: (props: any) => <FlowNode {...props} type="ai" />,
+  ai_generate: (props: any) => <FlowNode {...props} type="ai_generate" />,
   ticket: (props: any) => <FlowNode {...props} type="ticket" />
 };
 
@@ -103,13 +112,16 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
         const id = Date.now().toString();
         let initialData: any = { label: `Novo ${type}` };
         
-        if (type === 'menu') {
-            initialData.options = [{ label: 'Opção 1' }, { label: 'Opção 2' }];
+        if (type === 'menu' || type === 'ai') {
+            initialData.options = [{ label: 'Sim' }, { label: 'Não' }];
         } else if (type === 'media') {
             initialData.mediaType = 'image';
             initialData.label = 'Legenda opcional';
-        } else if (type === 'ai') {
-            initialData.label = 'Qualifique este lead conforme o contexto.';
+        } else if (type === 'ai_generate') {
+            initialData.label = 'Você é um assistente... gere uma resposta.';
+        } else if (type === 'interval') {
+            initialData.seconds = 5;
+            initialData.label = '';
         }
         
         const newNode = {
@@ -127,6 +139,12 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
 
     const handleSaveNodeEdit = (updatedData: any) => {
         setNodes(nds => nds.map(n => n.id === editingNode.id ? { ...n, data: updatedData } : n));
+        setEditingNode(null);
+    };
+
+    const handleDeleteNode = () => {
+        setNodes(nds => nds.filter(n => n.id !== editingNode.id));
+        setEdges(eds => eds.filter(e => e.source !== editingNode.id && e.target !== editingNode.id));
         setEditingNode(null);
     };
 
@@ -262,9 +280,24 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
                                 </div>
                             )}
 
+                            {editingNode.type === 'interval' && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">Tempo (Segundos)</label>
+                                        <input 
+                                            type="number"
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+                                            value={editingNode.data.seconds || 5}
+                                            onChange={e => setEditingNode({...editingNode, data: {...editingNode.data, seconds: parseInt(e.target.value) || 0}})}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {editingNode.type !== 'interval' && (
                             <div>
                                 <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                    {editingNode.type === 'ai' ? 'Instruções para IA' : 'Texto / Conteúdo'}
+                                    {editingNode.type === 'ai_generate' || editingNode.type === 'ai' ? 'Instruções para IA' : 'Texto / Conteúdo'}
                                 </label>
                                 {(editingNode.type === 'message' || editingNode.type === 'ticket') && (
                                     <div className="mb-2 flex flex-wrap gap-1.5">
@@ -294,11 +327,12 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
                                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none h-32 resize-none"
                                     value={editingNode.data.label || ''}
                                     onChange={e => setEditingNode({...editingNode, data: {...editingNode.data, label: e.target.value}})}
-                                    placeholder={editingNode.type === 'ai' ? "Ex: Avalie se o usuário aceitou a proposta..." : "Texto da mensagem..."}
+                                    placeholder={editingNode.type.startsWith('ai') ? "Ex: Avalie se o usuário aceitou a proposta..." : "Texto da mensagem..."}
                                 />
                             </div>
+                            )}
 
-                            {editingNode.type === 'menu' && (
+                            {(editingNode.type === 'menu' || editingNode.type === 'ai') && (
                                 <div>
                                     <label className="block text-sm font-semibold text-slate-700 mb-2 flex justify-between items-center">
                                         Opções de Resposta
@@ -341,12 +375,18 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
                             )}
 
                         </div>
-                        <div className="p-5 border-t border-slate-100 bg-white bottom-0">
+                        <div className="p-5 border-t border-slate-100 bg-white bottom-0 space-y-2">
                             <button 
                                 onClick={() => handleSaveNodeEdit(editingNode.data)}
                                 className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold transition-all shadow-sm"
                             >
                                 Confirmar Edição
+                            </button>
+                            <button 
+                                onClick={handleDeleteNode}
+                                className="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-sm font-semibold transition-all shadow-sm"
+                            >
+                                Excluir {editingNode.type}
                             </button>
                         </div>
                     </div>

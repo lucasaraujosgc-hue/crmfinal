@@ -359,6 +359,7 @@ const App: React.FC = () => {
 
   // Campaign Wizard State
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [campaignStep, setCampaignStep] = useState(1);
   const [newCampaign, setNewCampaign] = useState<{
      name: string;
@@ -583,21 +584,58 @@ const App: React.FC = () => {
     } catch(e) {}
   };
 
-  const createCampaign = async () => {
-    if (!newCampaign.name || selectedIds.size === 0) return alert('Selecione leads e dê um nome.');
-    try {
-      const res = await fetch('/api/campaigns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newCampaign, leads: Array.from(selectedIds) })
+  const startEditingCampaign = (campaign: any) => {
+      setEditingCampaignId(campaign.id);
+      
+      let parsedNodes = [];
+      let parsedEdges = [];
+      try {
+          if (campaign.flow_nodes) parsedNodes = typeof campaign.flow_nodes === 'string' ? JSON.parse(campaign.flow_nodes) : campaign.flow_nodes;
+          if (campaign.flow_edges) parsedEdges = typeof campaign.flow_edges === 'string' ? JSON.parse(campaign.flow_edges) : campaign.flow_edges;
+      } catch(e) {}
+      
+      setNewCampaign({
+          name: campaign.name || '',
+          description: campaign.description || '',
+          initialMessage: campaign.initial_message || '',
+          aiPersona: campaign.ai_persona || '',
+          flowNodes: parsedNodes,
+          flowEdges: parsedEdges
       });
-      if (res.ok) {
-        alert('Campanha disparada! O sistema processará os envios em background.');
-        setIsCreatingCampaign(false);
-        fetchCampaigns();
-        fetchCompanies();
-        setCampaignStep(1);
-        setSelectedIds(new Set());
+      setCampaignStep(1);
+      setIsCreatingCampaign(true);
+  };
+  
+  const createCampaign = async () => {
+    if (!newCampaign.name || (!editingCampaignId && selectedIds.size === 0)) return alert('Preencha os campos obrigatórios (incluindo leads se for nova).');
+    try {
+      if (editingCampaignId) {
+          const res = await fetch(`/api/campaigns/${editingCampaignId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newCampaign)
+          });
+          if (res.ok) {
+            alert('Campanha atualizada!');
+            setIsCreatingCampaign(false);
+            setEditingCampaignId(null);
+            fetchCampaigns();
+            setCampaignStep(1);
+          }
+      } else {
+          const res = await fetch('/api/campaigns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...newCampaign, leads: Array.from(selectedIds) })
+          });
+          if (res.ok) {
+            alert('Campanha disparada! O sistema processará os envios em background.');
+            setIsCreatingCampaign(false);
+            fetchCampaigns();
+            fetchCompanies();
+            setCampaignStep(1);
+            setSelectedIds(new Set());
+          }
       }
     } catch (e) {}
   };
@@ -853,12 +891,35 @@ const App: React.FC = () => {
 
                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                              {campaigns.map(c => (
-                                 <div key={c.id} className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm hover:border-brand-400 transition-colors">
+                                 <div key={c.id} className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm hover:border-brand-400 transition-colors relative group">
+                                     <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                         <button 
+                                             onClick={() => startEditingCampaign(c)}
+                                             className="p-1.5 text-slate-400 hover:text-brand-600 hover:bg-brand-50 rounded-md transition-colors"
+                                             title="Editar"
+                                         >
+                                             <Rocket size={16} />
+                                         </button>
+                                         <button 
+                                             onClick={async () => {
+                                                 if (window.confirm("Deseja realmente excluir esta campanha? (os envios atuais não serão revertidos)")) {
+                                                     try {
+                                                         await fetch(`/api/campaigns/${c.id}`, { method: 'DELETE' });
+                                                         fetchCampaigns();
+                                                     } catch(e) {}
+                                                 }
+                                             }}
+                                             className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                                             title="Excluir"
+                                         >
+                                             <X size={16} />
+                                         </button>
+                                     </div>
                                      <div className="flex justify-between items-start mb-4">
                                          <div className="p-2 bg-brand-50 text-brand-600 rounded-md"><Rocket size={18} /></div>
                                          <Badge variant="success">Ativa</Badge>
                                      </div>
-                                     <h3 className="font-semibold text-slate-900 mb-1 truncate">{c.name}</h3>
+                                     <h3 className="font-semibold text-slate-900 mb-1 truncate pr-16">{c.name}</h3>
                                      <p className="text-sm text-slate-500 line-clamp-2 mb-4">{c.description || 'Sem descrição definida.'}</p>
                                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-100">
                                          <div className="text-center">
