@@ -182,8 +182,19 @@ client.on('ready', () => {
 client.on('message', async (msg) => {
     if (msg.fromMe) return;
 
-    const waId = msg.from;
-    logSystem('msg_in', 'whatsapp', `Mensagem recebida de ${waId}`, { body: msg.body });
+    let waId = msg.from;
+    
+    // Tenta resolver o @lid para o número real se possível
+    try {
+        const contact = await msg.getContact();
+        if (contact && contact.number) {
+            waId = `${contact.number}@c.us`;
+        }
+    } catch (e) {
+        logSystem('error', 'whatsapp', 'Erro ao pegar contato', { error: e.message });
+    }
+
+    logSystem('msg_in', 'whatsapp', `Mensagem recebida de ${msg.from} (resolvido para ${waId})`, { body: msg.body });
 
     if (waId.includes('status@broadcast') || waId.includes('@g.us')) {
         return; 
@@ -200,10 +211,19 @@ client.on('message', async (msg) => {
     }
 
     const rawSenderPhone = waId.split('@')[0].replace(/\D/g, '');
-    const last8 = rawSenderPhone.slice(-8);
+    let searchCondition = [];
+    let searchValues = [waId];
+    
+    // Se for lid real q nao mapeou o numero, nao podemos usar last8. Mas vamos tentar.
+    const last8 = rawSenderPhone.length >= 8 ? rawSenderPhone.slice(-8) : rawSenderPhone;
+    
+    if (msg.from.includes('@lid')) {
+        // Se ainda assim for @lid, vamos tentar achar usando o lid que pode ter sido setado no envio
+        searchValues.push(msg.from);
+    }
 
-    db.all(`SELECT * FROM resultado WHERE wa_id = ? OR telefone LIKE ?`, 
-           [waId, `%${last8}%`], async (err, rows) => {
+    db.all(`SELECT * FROM resultado WHERE wa_id = ? OR telefone LIKE ? ${msg.from.includes('@lid') ? 'OR wa_id = ?' : ''}`, 
+           msg.from.includes('@lid') ? [waId, `%${last8}%`, msg.from] : [waId, `%${last8}%`], async (err, rows) => {
             
             if (err) {
                 logSystem('error', 'database', 'Erro ao buscar lead', { error: err.message });
@@ -211,13 +231,13 @@ client.on('message', async (msg) => {
             }
 
             if (!rows || rows.length === 0) {
-                logSystem('ai_skip', 'database', 'Telefone não encontrado na base de leads', { phone: rawSenderPhone });
+                logSystem('ai_skip', 'database', 'Telefone não encontrado na base de leads', { phone: rawSenderPhone, from: msg.from });
                 return;
             }
 
             // Filtragem precisa em JavaScript
             const company = rows.find(r => {
-                if (r.wa_id === waId) return true;
+                if (r.wa_id === waId || (msg.from.includes('@lid') && r.wa_id === msg.from)) return true;
                 const dbPhone = (r.telefone || '').replace(/\D/g, '');
                 return dbPhone.endsWith(rawSenderPhone) || rawSenderPhone.endsWith(dbPhone);
             });
@@ -225,6 +245,12 @@ client.on('message', async (msg) => {
             if (!company) {
                  logSystem('ai_skip', 'database', 'Match impreciso de telefone', { phone: rawSenderPhone });
                  return;
+            }
+            
+            // Se o msg.from tem @lid e não era o wa_id atual, vamos garantir que o banco salve o lid real que chegou
+            if (msg.from.includes('@lid') && company.wa_id !== msg.from) {
+                db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [msg.from, company.id]);
+                company.wa_id = msg.from; // Atualiza a variável pra esse fluxo
             }
 
             if (company.ai_active !== 1) {
@@ -595,11 +621,10 @@ async function processPDFAndScrape(filepath, processId, filename) {
 
     // Identificar IEs
     const ies = [];
-    const normalized = extractedText.replace(/ /g, '');
-    const regex = /\d{2,3}\.\d{3}\.\d{3}/g;
+    const regex = /(\d{1,3}\.\d{1,3}\.\d{1,3})\s*-/g;
     let match;
-    while ((match = regex.exec(normalized)) !== null) {
-        const cleanIE = match[0].replace(/\D/g, '');
+    while ((match = regex.exec(extractedText)) !== null) {
+        const cleanIE = match[1].replace(/\D/g, '');
         if (cleanIE.length === 8 || cleanIE.length === 9) ies.push(cleanIE);
     }
     const uniqueIEs = [...new Set(ies)];
