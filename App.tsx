@@ -901,14 +901,20 @@ const App: React.FC = () => {
                                              <Rocket size={16} />
                                          </button>
                                          <button 
-                                             onClick={async () => {
-                                                 if (window.confirm("Deseja realmente excluir esta campanha? (os envios atuais não serão revertidos)")) {
-                                                     try {
-                                                         await fetch(`/api/campaigns/${c.id}`, { method: 'DELETE' });
-                                                         fetchCampaigns();
-                                                     } catch(e) {}
-                                                 }
-                                             }}
+                                         onClick={async () => {
+                                                if (window.confirm("Deseja realmente excluir esta campanha? (os envios atuais não serão revertidos)")) {
+                                                    try {
+                                                        const res = await fetch(`/api/campaigns/${c.id}`, { method: 'DELETE' });
+                                                        if (!res.ok) {
+                                                            const data = await res.json().catch(() => ({}));
+                                                            alert('Erro ao excluir campanha: ' + (data.error || res.status));
+                                                        }
+                                                        fetchCampaigns();
+                                                    } catch(e) {
+                                                        alert('Erro de conexão ao excluir campanha.');
+                                                    }
+                                                }
+                                            }}
                                              className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
                                              title="Excluir"
                                          >
