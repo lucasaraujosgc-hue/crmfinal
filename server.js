@@ -1093,9 +1093,14 @@ app.get('/api/campaigns', (req, res) => {
 });
 
 app.delete('/api/campaigns/:id', (req, res) => {
-    db.run('DELETE FROM campaign WHERE id = ?', [req.params.id], (err) => {
+    const id = req.params.id;
+    // Primeiro desvincula os leads da campanha, depois apaga a campanha
+    db.run('UPDATE resultado SET campaign_id = NULL, campaign_status = NULL WHERE campaign_id = ?', [id], (err) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+        db.run('DELETE FROM campaign WHERE id = ?', [id], (err2) => {
+            if (err2) return res.status(500).json({ error: err2.message });
+            res.json({ success: true });
+        });
     });
 });
 
