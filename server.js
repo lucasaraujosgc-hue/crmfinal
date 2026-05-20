@@ -58,8 +58,14 @@ db.serialize(() => {
     initial_message TEXT,
     ai_persona TEXT,
     status TEXT,
-    created_at TEXT
+    created_at TEXT,
+    flow_nodes TEXT,
+    flow_edges TEXT
   )`);
+  
+  // Alter tables to add new columns if they don't exist
+  db.run(`ALTER TABLE campaign ADD COLUMN flow_nodes TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE campaign ADD COLUMN flow_edges TEXT`, (err) => { /* ignore */ });
 
   db.run(`CREATE TABLE IF NOT EXISTS resultado (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -282,6 +288,8 @@ client.on('message', async (msg) => {
                     if (matchedRule.reasonExplanation) instrStr += `\n- EXPLICAÇÃO DO MOTIVO: ${matchedRule.reasonExplanation}`;
                     if (matchedRule.regularizationProcess) instrStr += `\n- PROCESSO DE REGULARIZAÇÃO: ${matchedRule.regularizationProcess}`;
                     if (matchedRule.requiredInfo) instrStr += `\n- INFORMAÇÕES NECESSÁRIAS: ${matchedRule.requiredInfo}`;
+                    if (matchedRule.prazos) instrStr += `\n- PRAZOS (SLA E REGULARIZAÇÃO): ${matchedRule.prazos}`;
+                    if (matchedRule.valores) instrStr += `\n- VALORES/TAXAS ESTIMADAS: ${matchedRule.valores}`;
                     if (matchedRule.defaultResponse) {
                         currentDefaultResponse = matchedRule.defaultResponse;
                         instrStr += `\n- RESPOSTA PADRÃO PARA EXCEÇÕES: Se o lead fizer uma pergunta na qual você não saberia a resposta ou está fora do escopo do processo de regularização, responda EXATAMENTE com o texto a seguir e encerre a conversa por hora: "${matchedRule.defaultResponse}" e não forneça informações adicionais.`;
@@ -289,6 +297,41 @@ client.on('message', async (msg) => {
                     
                     if (matchedRule.instructions && matchedRule.instructions.length > 0) {
                         instrStr += '\n- INSTRUÇÕES ADICIONAIS:\n' + matchedRule.instructions.map(inst => `  - ${inst.content}`).join('\n');
+                    }
+                    
+                    if (matchedRule.flowNodes && matchedRule.flowNodes.length > 0) {
+                        instrStr += '\n\n[FLUXO CONVERSACIONAL GUIADO PELA IA]';
+                        instrStr += '\nSiga a ordem lógica abaixo para estruturar a conversa com o cliente:';
+                        
+                        const edgesMap = {};
+                        if (matchedRule.flowEdges) {
+                            matchedRule.flowEdges.forEach(e => {
+                                if (!edgesMap[e.source]) edgesMap[e.source] = [];
+                                edgesMap[e.source].push(e.target);
+                            });
+                        }
+                        
+                        const parseNode = (nodeId, indent = '', visited = new Set()) => {
+                            if (visited.has(nodeId)) return '';
+                            visited.add(nodeId);
+                            const node = matchedRule.flowNodes.find(n => n.id === nodeId);
+                            if (!node) return '';
+                            let out = `\n${indent}- [${node.type.toUpperCase()}] ${node.data.label}`;
+                            if (edgesMap[nodeId]) {
+                                edgesMap[nodeId].forEach(targetId => {
+                                    out += parseNode(targetId, indent + '  ', visited);
+                                });
+                            }
+                            return out;
+                        };
+                        
+                        // Find starting nodes (nodes with no incoming edges)
+                        const targetIds = new Set(matchedRule.flowEdges ? matchedRule.flowEdges.map(e => e.target) : []);
+                        const startNodes = matchedRule.flowNodes.filter(n => !targetIds.has(n.id));
+                        
+                        startNodes.forEach(n => {
+                            instrStr += parseNode(n.id);
+                        });
                     }
 
                     ruleContext = `
@@ -302,7 +345,52 @@ Diretrizes da Base de Conhecimento para este caso:${instrStr}
             let persona = aiConfig.persona;
             if (company.campaign_id) {
                  const campaign = await new Promise(resolve => db.get('SELECT * FROM campaign WHERE id = ?', [company.campaign_id], (e, r) => resolve(r)));
-                 if (campaign && campaign.ai_persona) persona = campaign.ai_persona;
+                 if (campaign) {
+                     if (campaign.ai_persona) persona = campaign.ai_persona;
+                     
+                     if (campaign.flow_nodes && campaign.flow_nodes !== 'undefined') {
+                         try {
+                             const flowNodes = JSON.parse(campaign.flow_nodes);
+                             const flowEdges = campaign.flow_edges && campaign.flow_edges !== 'undefined' ? JSON.parse(campaign.flow_edges) : [];
+                             
+                             if (flowNodes && flowNodes.length > 0) {
+                                let flowStr = '\n\n[FLUXO CONVERSACIONAL DA CAMPANHA DE ATIVAÇÃO]';
+                                flowStr += '\nSiga a ordem lógica abaixo para estruturar a conversa com o cliente:';
+                                
+                                const edgesMap = {};
+                                flowEdges.forEach(e => {
+                                    if (!edgesMap[e.source]) edgesMap[e.source] = [];
+                                    edgesMap[e.source].push(e.target);
+                                });
+                                
+                                const parseNode = (nodeId, indent = '', visited = new Set()) => {
+                                    if (visited.has(nodeId)) return '';
+                                    visited.add(nodeId);
+                                    const node = flowNodes.find(n => n.id === nodeId);
+                                    if (!node) return '';
+                                    let out = `\n${indent}- [${node.type.toUpperCase()}] ${node.data?.label}`;
+                                    if (edgesMap[nodeId]) {
+                                        edgesMap[nodeId].forEach(targetId => {
+                                            out += parseNode(targetId, indent + '  ', visited);
+                                        });
+                                    }
+                                    return out;
+                                };
+                                
+                                const targetIds = new Set(flowEdges.map(e => e.target));
+                                const startNodes = flowNodes.filter(n => !targetIds.has(n.id));
+                                
+                                startNodes.forEach(n => {
+                                    flowStr += parseNode(n.id);
+                                });
+                                
+                                ruleContext += flowStr;
+                             }
+                         } catch (e) {
+                             logSystem('error', 'campaign', 'Erro ao interpretar flow da campanha', { err: e.message });
+                         }
+                     }
+                 }
             }
             
             // Prompt Blindado
@@ -322,6 +410,7 @@ ${ruleContext}
 3. Se houver [CONTEXTO JURÍDICO], use as informações de "Diagnóstico" e "Solução" para explicar o problema ao cliente de forma simples e direta.
 4. O objetivo é vender o serviço de regularização ou agendar uma reunião.
 5. Responda apenas à última mensagem do usuário de forma coerente. Mantenha a resposta curta (máximo 3 frases), estilo chat.
+6. [MUITO IMPORTANTE SOBRE O FLUXO] O "Fluxo Conversacional" se existir, serve como um guia mestre de etapas. Tente conduzir o usuário por ele gradativamente. No entanto, se o usuário fizer uma pergunta solta, fora de ordem, não quebre: responda naturalmente usando o [CONTEXTO JURÍDICO] e, no final, faça uma pergunta sutil para trazê-lo de volta pro próximo passo lógico do Fluxo.
 `;
 
             try {
@@ -572,6 +661,109 @@ app.get('/get-imports', (req, res) => {
     });
 });
 
+app.post('/api/imports/:id/refresh', (req, res) => {
+    const consultaId = req.params.id;
+    db.all("SELECT inscricao_estadual FROM resultado WHERE consulta_id = ?", [consultaId], (err, rows) => {
+        if (err || !rows || rows.length === 0) return res.status(404).json({ error: 'Nenhum lead encontrado para essa base' });
+        
+        const uniqueIEs = [...new Set(rows.map(r => r.inscricao_estadual))];
+        db.run("UPDATE consulta SET status = 'processing', processed = 0 WHERE id = ?", [consultaId]);
+        
+        res.json({ success: true, message: 'Processo de atualização iniciado' });
+        
+        reProcessConsulta(consultaId, uniqueIEs);
+    });
+});
+
+async function reProcessConsulta(consultaId, uniqueIEs) {
+    logSystem('info', 'scraper', `Iniciando atualização da base: ${consultaId}`);
+    let browser;
+    try {
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        
+        for (let i = 0; i < uniqueIEs.length; i++) {
+            const ie = uniqueIEs[i];
+            logSystem('info', 'scraper', `Re-consultando IE ${i+1}/${uniqueIEs.length}: ${ie}`);
+            
+            try {
+                await page.goto('https://portal.sefaz.ba.gov.br/scripts/cadastro/cadastroBa/consultaBa.asp', { waitUntil: 'networkidle2', timeout: 30000 });
+                await page.waitForSelector('input[name="IE"]');
+                await page.type('input[name="IE"]', ie);
+                
+                await Promise.all([
+                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                    page.evaluate(() => {
+                        const btns = document.querySelectorAll('input[type="submit"]');
+                        for(let b of btns) {
+                            if(b.value.includes('IE')) { b.click(); return; }
+                        }
+                    })
+                ]);
+                
+                const html = await page.content();
+                const $ = cheerio.load(html);
+                
+                const scrapeField = (label) => {
+                    let val = null;
+                    $('b').each((_, el) => {
+                        if ($(el).text().includes(label)) {
+                            val = $(el)[0].nextSibling ? $(el)[0].nextSibling.nodeValue : null;
+                        }
+                    });
+                    return val ? val.replace(/\xA0/g, ' ').trim() : null;
+                };
+
+                let razaoSocial = scrapeField('Razão Social:');
+                let cnpj = scrapeField('CNPJ:');
+                let uf = scrapeField('UF:');
+                let municipio = scrapeField('Município:');
+                let logradouro = scrapeField('Logradouro:');
+                let telefone = scrapeField('Telefone:');
+                let email = scrapeField('E-mail:');
+                let situacaoCadastral = scrapeField('Situação Cadastral Vigente:');
+                let motivoSituacao = scrapeField('Motivo desta Situação Cadastral:');
+                let nomeContador = scrapeField('Nome:');
+                
+                let atividade = null;
+                $('b').each((_, el) => {
+                    if ($(el).text().includes('Atividade Econômica')) {
+                        const trPai = $(el).closest('tr');
+                        if (trPai.length && trPai.next().length) {
+                           atividade = trPai.next().text().replace(/\xA0/g, ' ').trim();
+                        }
+                    }
+                });
+
+                if (razaoSocial) {
+                    db.run(`UPDATE resultado SET 
+                    cnpj = ?, razao_social = ?, municipio = ?, uf = ?, logradouro = ?, telefone = ?, email = ?, 
+                    atividade_economica_principal = ?, situacao_cadastral = ?, motivo_situacao_cadastral = ?, nome_contador = ?, status = 'Sucesso' 
+                    WHERE consulta_id = ? AND inscricao_estadual = ?`,
+                     [cnpj, razaoSocial, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, motivoSituacao, nomeContador, consultaId, ie]);
+                } else {
+                    db.run(`UPDATE resultado SET status = 'Erro: Não encontrado' WHERE consulta_id = ? AND inscricao_estadual = ?`, [consultaId, ie]);
+                }
+
+            } catch (err) {
+                logSystem('error', 'scraper', `Falha ao reprocessar IE ${ie}`, { error: err.message });
+                db.run(`UPDATE resultado SET status = 'Erro: Falha Navegação' WHERE consulta_id = ? AND inscricao_estadual = ?`, [consultaId, ie]);
+            }
+            
+            db.run("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, consultaId]);
+        }
+    } catch (e) {
+        logSystem('error', 'scraper', `Erro fatal no browser Puppeteer (ReScrape)`, { error: e.message });
+    } finally {
+        if (browser) await browser.close();
+        db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), consultaId]);
+        logSystem('info', 'scraper', `Atualização finalizada para base: ${consultaId}`);
+    }
+}
+
 app.delete('/api/imports/:id', (req, res) => {
     db.run("DELETE FROM resultado WHERE consulta_id = ?", [req.params.id], () => {
         db.run("DELETE FROM consulta WHERE id = ?", [req.params.id], () => {
@@ -624,12 +816,15 @@ app.get('/api/campaigns', (req, res) => {
 });
 
 app.post('/api/campaigns', (req, res) => {
-    const { name, description, initialMessage, aiPersona, leads } = req.body;
+    const { name, description, initialMessage, aiPersona, leads, flowNodes, flowEdges } = req.body;
     if (!leads || leads.length === 0) return res.status(400).json({ error: 'Nenhum lead selecionado' });
 
     const campaignId = uuidv4();
-    db.run(`INSERT INTO campaign (id, name, description, initial_message, ai_persona, status, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?)`,
-            [campaignId, name, description, initialMessage, aiPersona, new Date().toISOString()], (err) => {
+    const flowNodesStr = flowNodes ? JSON.stringify(flowNodes) : null;
+    const flowEdgesStr = flowEdges ? JSON.stringify(flowEdges) : null;
+
+    db.run(`INSERT INTO campaign (id, name, description, initial_message, ai_persona, status, created_at, flow_nodes, flow_edges) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+            [campaignId, name, description, initialMessage, aiPersona, new Date().toISOString(), flowNodesStr, flowEdgesStr], (err) => {
                 if (err) return res.status(500).json({ error: err.message });
                 
                 const placeholders = leads.map(() => '?').join(',');

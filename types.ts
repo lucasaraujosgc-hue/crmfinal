@@ -68,6 +68,10 @@ export interface KnowledgeRule {
   requiredInfo?: string;
   reasonExplanation?: string;
   defaultResponse?: string;
+  prazos?: string;         // Adicionado
+  valores?: string;        // Adicionado
+  flowNodes?: any[];
+  flowEdges?: any[];
   isActive: boolean;
 }
 

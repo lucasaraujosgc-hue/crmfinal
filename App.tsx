@@ -289,8 +289,11 @@ const KanbanCard: React.FC<KanbanCardProps> = ({ company, onClick }) => (
     </div>
 );
 
-// --- MAIN APP COMPONENT ---
+import { FlowEditorModal } from './src/components/FlowEditorModal';
 
+// --- INITIAL STATES ---
+
+// ... (code)
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -300,6 +303,8 @@ const App: React.FC = () => {
   const [imports, setImports] = useState<ImportBatch[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [stats, setStats] = useState({ total: 0, processed: 0, success: 0, errors: 0 });
+  
+  const [isFlowEditorOpen, setIsFlowEditorOpen] = useState(false);
   
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
@@ -323,12 +328,21 @@ const App: React.FC = () => {
   // Campaign Wizard State
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
   const [campaignStep, setCampaignStep] = useState(1);
-  const [newCampaign, setNewCampaign] = useState({
+  const [newCampaign, setNewCampaign] = useState<{
+     name: string;
+     description: string;
+     initialMessage: string;
+     aiPersona: string;
+     flowNodes?: any[];
+     flowEdges?: any[];
+  }>({
      name: '',
      description: '',
      initialMessage: 'Olá, tudo bem? Vi que sua empresa possui pendências na SEFAZ e gostaria de ajudar na regularização.',
      aiPersona: DEFAULT_AI_PERSONA
   });
+
+  const [isCampaignFlowEditorOpen, setIsCampaignFlowEditorOpen] = useState(false);
 
   // AI & Knowledge
   const [aiConfig, setAiConfig] = useLocalStorage<AIConfig>('crm_ai_config', {
@@ -859,6 +873,22 @@ const App: React.FC = () => {
                                          </div>
                                          <p className="text-xs text-slate-500 mb-2">Esta mensagem será enviada para iniciar a conversa.</p>
                                          <textarea className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 h-48 resize-none" value={newCampaign.initialMessage} onChange={e => setNewCampaign({...newCampaign, initialMessage: e.target.value})} />
+                                         
+                                         {/* Flow Builder UI Section in Campaign */}
+                                         <div className="pt-4 border-t border-slate-100 mt-4">
+                                             <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg p-4">
+                                                <div>
+                                                    <h4 className="text-sm font-semibold text-blue-800">Flow Builder IA</h4>
+                                                    <p className="text-xs text-blue-600 mt-1">Crie um fluxo opcional guiado para esta campanha.</p>
+                                                </div>
+                                                <button 
+                                                    onClick={() => setIsCampaignFlowEditorOpen(true)}
+                                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors"
+                                                >
+                                                    {newCampaign.flowNodes && newCampaign.flowNodes.length > 0 ? 'Editar Fluxo' : 'Criar Fluxo'}
+                                                </button>
+                                             </div>
+                                         </div>
                                      </div>
                                      <div className="space-y-4">
                                          <div className="flex items-center gap-2 mb-2">
@@ -866,7 +896,7 @@ const App: React.FC = () => {
                                              <h3 className="text-sm font-semibold text-slate-800">Persona Específica</h3>
                                          </div>
                                          <p className="text-xs text-slate-500 mb-2">Sobrescrever a persona padrão.</p>
-                                         <textarea className="w-full px-3 py-2 border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 h-48 resize-none" value={newCampaign.aiPersona} onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})} />
+                                         <textarea className="w-full px-3 py-2 border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 h-64 resize-none" value={newCampaign.aiPersona} onChange={e => setNewCampaign({...newCampaign, aiPersona: e.target.value})} />
                                      </div>
                                  </div>
                              )}
@@ -981,6 +1011,22 @@ const App: React.FC = () => {
                                         <p className="text-xs text-brand-800">{rule.requiredInfo}</p>
                                     </div>
                                 )}
+                                {(rule.prazos || rule.valores) && (
+                                    <div className="flex gap-2">
+                                        {rule.prazos && (
+                                            <div className="flex-1 p-3 bg-amber-50 rounded-md border border-amber-100/50">
+                                                <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider mb-1">Prazos</p>
+                                                <p className="text-xs text-amber-800">{rule.prazos}</p>
+                                            </div>
+                                        )}
+                                        {rule.valores && (
+                                            <div className="flex-1 p-3 bg-blue-50 rounded-md border border-blue-100/50">
+                                                <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1">Valores</p>
+                                                <p className="text-xs text-blue-800">{rule.valores}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 {rule.defaultResponse && (
                                     <div className="p-3 bg-slate-100 rounded-md border border-slate-200/50">
                                         <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Fallback</p>
@@ -1005,16 +1051,14 @@ const App: React.FC = () => {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Motivo SEFAZ (Alvo)</label>
                                     <div className="relative">
-                                        <input 
-                                            list="db-reasons"
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 uppercase pr-8" 
-                                            placeholder="Selecione um motivo..." 
+                                        <select 
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 uppercase pr-8 appearance-none bg-white" 
                                             value={editingRule.motivoSituacao} 
                                             onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})} 
-                                        />
-                                        <datalist id="db-reasons">
-                                            {availableReasons.map((reason, idx) => <option key={idx} value={reason} />)}
-                                        </datalist>
+                                        >
+                                            <option value="" disabled hidden>SELECIONE UM MOTIVO...</option>
+                                            {availableReasons.map((reason, idx) => <option key={idx} value={reason}>{reason}</option>)}
+                                        </select>
                                         <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                     </div>
                                 </div>
@@ -1031,9 +1075,35 @@ const App: React.FC = () => {
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Informações Necessárias</label>
                                         <textarea className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 h-20 resize-none" value={editingRule.requiredInfo || ''} onChange={e => setEditingRule({...editingRule, requiredInfo: e.target.value})} placeholder="Documentos e informações do cliente..." />
                                     </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Prazos</label>
+                                            <textarea className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 h-20 resize-none" value={editingRule.prazos || ''} onChange={e => setEditingRule({...editingRule, prazos: e.target.value})} placeholder="Prazos para regularização..." />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Valores</label>
+                                            <textarea className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 h-20 resize-none" value={editingRule.valores || ''} onChange={e => setEditingRule({...editingRule, valores: e.target.value})} placeholder="Custos e taxas envolvidas..." />
+                                        </div>
+                                    </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Resposta Padrão (Fallback)</label>
                                         <textarea className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 h-20 resize-none" value={editingRule.defaultResponse || ''} onChange={e => setEditingRule({...editingRule, defaultResponse: e.target.value})} placeholder="Resposta de segurança..." />
+                                    </div>
+                                    
+                                    {/* Botão do Flow Builder */}
+                                    <div className="pt-4 border-t border-slate-100 mt-6">
+                                        <div className="flex items-center justify-between bg-brand-50 border border-brand-100 rounded-lg p-4">
+                                            <div>
+                                                <h4 className="text-sm font-semibold text-brand-800">Flow Builder IA</h4>
+                                                <p className="text-xs text-brand-600 mt-1">Crie um fluxo visual de respostas para este motivo.</p>
+                                            </div>
+                                            <button 
+                                                onClick={() => setIsFlowEditorOpen(true)}
+                                                className="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-md text-sm font-medium transition-colors"
+                                            >
+                                                Editar Fluxo
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1046,6 +1116,30 @@ const App: React.FC = () => {
                             </div>
                         </div>
                     </div>
+                )}
+                
+                {isFlowEditorOpen && editingRule && (
+                    <FlowEditorModal 
+                        rule={editingRule} 
+                        onClose={() => setIsFlowEditorOpen(false)} 
+                        onSave={(nodes: any[], edges: any[]) => {
+                            setEditingRule({ ...editingRule, flowNodes: nodes, flowEdges: edges });
+                            setIsFlowEditorOpen(false);
+                            alert("Fluxo salvo na regra. Salve a regra principal para persistir no banco.");
+                        }} 
+                    />
+                )}
+                
+                {isCampaignFlowEditorOpen && (
+                    <FlowEditorModal 
+                        rule={{ motivoSituacao: "Campanha: " + (newCampaign.name || 'Nova'), flowNodes: newCampaign.flowNodes, flowEdges: newCampaign.flowEdges }} 
+                        onClose={() => setIsCampaignFlowEditorOpen(false)} 
+                        onSave={(nodes: any[], edges: any[]) => {
+                            setNewCampaign({ ...newCampaign, flowNodes: nodes, flowEdges: edges });
+                            setIsCampaignFlowEditorOpen(false);
+                            alert("Fluxo da campanha salvo temporariamente. Finalize a criação da campanha para persistir.");
+                        }} 
+                    />
                 )}
             </div>
           )}
@@ -1313,9 +1407,20 @@ const App: React.FC = () => {
                                         </div>
                                     )}
                                     <Badge variant={imp.status === 'completed' ? 'success' : imp.status === 'error' ? 'error' : 'warning'}>{imp.status.toUpperCase()}</Badge>
-                                    <button onClick={() => deleteImport(imp.id)} className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-md hover:bg-rose-50" title="Remover histórico">
-                                      <Trash2 size={16}/>
-                                    </button>
+                                    <div className="flex gap-1">
+                                        <button onClick={async () => {
+                                            if (confirm("Deseja re-extrair os dados dessa lista na SEFAZ? O lead será mantido no histórico.")) {
+                                                await fetch(`/api/imports/${imp.id}/refresh`, { method: 'POST' });
+                                                fetchImports();
+                                                fetchCompanies();
+                                            }
+                                        }} className="p-2 text-slate-400 hover:text-brand-600 transition-colors rounded-md hover:bg-brand-50" title="Atualizar (Re-extratir)">
+                                            <RefreshCw size={16}/>
+                                        </button>
+                                        <button onClick={() => deleteImport(imp.id)} className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-md hover:bg-rose-50" title="Remover histórico">
+                                          <Trash2 size={16}/>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ))}

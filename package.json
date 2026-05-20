@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "*",
+    "@xyflow/react": "^12.10.2",
     "buffer": "^6.0.3",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",
