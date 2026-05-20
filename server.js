@@ -556,12 +556,11 @@ async function processPDFAndScrape(filepath, processId, filename) {
 
     // Identificar IEs
     const ies = [];
-    const tokens = extractedText.split(/[\s\n\r\t:,;\|]+/);
-    for (const token of tokens) {
-        const cleanIE = token.replace(/\D/g, '');
-        if (cleanIE.length === 8 || cleanIE.length === 9) {
-            ies.push(cleanIE);
-        }
+    const regex = /(?:\d\s*){2,3}\s*\.\s*(?:\d\s*){3}\s*\.\s*(?:\d\s*){3}/g;
+    let match;
+    while ((match = regex.exec(extractedText)) !== null) {
+        const cleanIE = match[0].replace(/\D/g, '');
+        if (cleanIE.length === 8 || cleanIE.length === 9) ies.push(cleanIE);
     }
     const uniqueIEs = [...new Set(ies)];
     
