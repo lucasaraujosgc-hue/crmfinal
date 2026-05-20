@@ -15,7 +15,7 @@ import fs from 'fs';
 import { GoogleGenAI } from "@google/genai";
 import { Groq } from 'groq-sdk';
 import multer from 'multer';
-import sqlite3 from 'sqlite3';
+import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import * as cheerio from 'cheerio';
 const pdf = require('pdf-parse');
@@ -39,7 +39,54 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-const db = new sqlite3.Database(DB_PATH);
+const betterDb = new Database(DB_PATH);
+const db = {
+    serialize: (cb) => {
+        if (cb) setImmediate(cb);
+    },
+    run: function(sql, params, cb) {
+        if (typeof params === 'function') {
+            cb = params;
+            params = [];
+        }
+        try {
+            const info = betterDb.prepare(sql).run(params || []);
+            if (cb) setImmediate(() => cb.call({ lastID: info.lastInsertRowid, changes: info.changes }, null));
+        } catch (err) {
+            if (cb) setImmediate(() => cb(err));
+            else console.error(err);
+        }
+        return this;
+    },
+    all: function(sql, params, cb) {
+        if (typeof params === 'function') {
+            cb = params;
+            params = [];
+        }
+        try {
+            const rows = betterDb.prepare(sql).all(params || []);
+            if (cb) setImmediate(() => cb(null, rows));
+        } catch (err) {
+            if (cb) setImmediate(() => cb(err));
+            else console.error(err);
+        }
+        return this;
+    },
+    get: function(sql, params, cb) {
+        if (typeof params === 'function') {
+            cb = params;
+            params = [];
+        }
+        try {
+            const row = betterDb.prepare(sql).get(params || []);
+            if (cb) setImmediate(() => cb(null, row));
+        } catch (err) {
+            if (cb) setImmediate(() => cb(err));
+            else console.error(err);
+        }
+        return this;
+    }
+};
 
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS consulta (

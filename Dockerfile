@@ -1,5 +1,5 @@
 # Stage 1: Build the React application
-FROM node:18-alpine AS builder
+FROM node:18-slim AS builder
 
 WORKDIR /app
 
@@ -45,6 +45,7 @@ RUN npm install --production
 # Copy Server Code (Note: NO app.py or requirements.txt needed anymore)
 COPY server.js .
 COPY polyfill.js .
+COPY flowEngine.js .
 
 # Create uploads and auth directory
 RUN mkdir -p sefaz_uploads whatsapp_auth
