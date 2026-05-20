@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@google/genai": "*",
+    "@types/better-sqlite3": "^7.6.13",
     "@xyflow/react": "^12.10.2",
+    "better-sqlite3": "^12.10.0",
     "buffer": "^6.0.3",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",
