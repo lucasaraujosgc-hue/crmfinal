@@ -647,14 +647,23 @@ async function processPDFAndScrape(filepath, processId, filename) {
                 const scrapeField = (label) => {
                     let val = null;
                     $('b').each((_, el) => {
+                        if (val) return;
                         if ($(el).text().includes(label)) {
-                            val = $(el)[0].nextSibling ? $(el)[0].nextSibling.nodeValue : null;
+                            let textNode = $(el)[0].nextSibling;
+                            let extracted = textNode ? textNode.nodeValue : null;
+                            if (extracted) {
+                                let currVal = extracted.replace(/\xA0|&nbsp;/g, ' ').trim();
+                                if (currVal !== '' && currVal !== '()') {
+                                    val = currVal;
+                                }
+                            }
                         }
                     });
-                    return val ? val.replace(/\xA0/g, ' ').trim() : null;
+                    return val;
                 };
 
                 let razaoSocial = scrapeField('Razão Social:');
+                let nomeFantasia = scrapeField('Nome Fantasia:');
                 let cnpj = scrapeField('CNPJ:');
                 let uf = scrapeField('UF:');
                 let municipio = scrapeField('Município:');
@@ -662,6 +671,7 @@ async function processPDFAndScrape(filepath, processId, filename) {
                 let telefone = scrapeField('Telefone:');
                 let email = scrapeField('E-mail:');
                 let situacaoCadastral = scrapeField('Situação Cadastral Vigente:');
+                let dataSituacaoCadastral = scrapeField('Data desta Situação Cadastral:');
                 let motivoSituacao = scrapeField('Motivo desta Situação Cadastral:');
                 let nomeContador = scrapeField('Nome:'); // do contador
                 
@@ -670,17 +680,17 @@ async function processPDFAndScrape(filepath, processId, filename) {
                     if ($(el).text().includes('Atividade Econômica')) {
                         const trPai = $(el).closest('tr');
                         if (trPai.length && trPai.next().length) {
-                           atividade = trPai.next().text().replace(/\xA0/g, ' ').trim();
+                           atividade = trPai.next().text().replace(/\xA0|&nbsp;/g, ' ').trim();
                         }
                     }
                 });
 
                 if (razaoSocial) {
                     db.run(`INSERT INTO resultado 
-                    (consulta_id, inscricao_estadual, cnpj, razao_social, municipio, uf, logradouro, telefone, email, 
-                    atividade_economica_principal, situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`,
-                     [processId, ie, cnpj, razaoSocial, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, motivoSituacao, nomeContador]);
+                    (consulta_id, inscricao_estadual, cnpj, razao_social, nome_fantasia, municipio, uf, logradouro, telefone, email, 
+                    atividade_economica_principal, situacao_cadastral, data_situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`,
+                     [processId, ie, cnpj, razaoSocial, nomeFantasia, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador]);
                 } else {
                     db.run(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Não encontrado')`, [processId, ie]);
                 }
@@ -783,14 +793,23 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
                 const scrapeField = (label) => {
                     let val = null;
                     $('b').each((_, el) => {
+                        if (val) return;
                         if ($(el).text().includes(label)) {
-                            val = $(el)[0].nextSibling ? $(el)[0].nextSibling.nodeValue : null;
+                            let textNode = $(el)[0].nextSibling;
+                            let extracted = textNode ? textNode.nodeValue : null;
+                            if (extracted) {
+                                let currVal = extracted.replace(/\xA0|&nbsp;/g, ' ').trim();
+                                if (currVal !== '' && currVal !== '()') {
+                                    val = currVal;
+                                }
+                            }
                         }
                     });
-                    return val ? val.replace(/\xA0/g, ' ').trim() : null;
+                    return val;
                 };
 
                 let razaoSocial = scrapeField('Razão Social:');
+                let nomeFantasia = scrapeField('Nome Fantasia:');
                 let cnpj = scrapeField('CNPJ:');
                 let uf = scrapeField('UF:');
                 let municipio = scrapeField('Município:');
@@ -798,6 +817,7 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
                 let telefone = scrapeField('Telefone:');
                 let email = scrapeField('E-mail:');
                 let situacaoCadastral = scrapeField('Situação Cadastral Vigente:');
+                let dataSituacaoCadastral = scrapeField('Data desta Situação Cadastral:');
                 let motivoSituacao = scrapeField('Motivo desta Situação Cadastral:');
                 let nomeContador = scrapeField('Nome:');
                 
@@ -806,17 +826,17 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
                     if ($(el).text().includes('Atividade Econômica')) {
                         const trPai = $(el).closest('tr');
                         if (trPai.length && trPai.next().length) {
-                           atividade = trPai.next().text().replace(/\xA0/g, ' ').trim();
+                           atividade = trPai.next().text().replace(/\xA0|&nbsp;/g, ' ').trim();
                         }
                     }
                 });
 
                 if (razaoSocial) {
                     db.run(`UPDATE resultado SET 
-                    cnpj = ?, razao_social = ?, municipio = ?, uf = ?, logradouro = ?, telefone = ?, email = ?, 
-                    atividade_economica_principal = ?, situacao_cadastral = ?, motivo_situacao_cadastral = ?, nome_contador = ?, status = 'Sucesso' 
+                    cnpj = ?, razao_social = ?, nome_fantasia = ?, municipio = ?, uf = ?, logradouro = ?, telefone = ?, email = ?, 
+                    atividade_economica_principal = ?, situacao_cadastral = ?, data_situacao_cadastral = ?, motivo_situacao_cadastral = ?, nome_contador = ?, status = 'Sucesso' 
                     WHERE consulta_id = ? AND inscricao_estadual = ?`,
-                     [cnpj, razaoSocial, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, motivoSituacao, nomeContador, consultaId, ie]);
+                     [cnpj, razaoSocial, nomeFantasia, municipio, uf, logradouro, telefone, email, atividade, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador, consultaId, ie]);
                 } else {
                     db.run(`UPDATE resultado SET status = 'Erro: Não encontrado' WHERE consulta_id = ? AND inscricao_estadual = ?`, [consultaId, ie]);
                 }
@@ -877,7 +897,7 @@ app.get('/api/unique-filters', (req, res) => {
 app.get('/get-all-results', (req, res) => {
   db.all('SELECT * FROM resultado ORDER BY id DESC', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(r => ({ ...r, id: r.id.toString(), inscricaoEstadual: r.inscricao_estadual, razaoSocial: r.razao_social, nomeFantasia: r.nome_fantasia, situacaoCadastral: r.situacao_cadastral, motivoSituacao: r.motivo_situacao_cadastral, campaignStatus: r.campaign_status || 'pending', aiActive: r.ai_active === 1, wa_id: r.wa_id })));
+    res.json(rows.map(r => ({ ...r, id: r.id.toString(), inscricaoEstadual: r.inscricao_estadual, razaoSocial: r.razao_social, nomeFantasia: r.nome_fantasia, situacaoCadastral: r.situacao_cadastral, dataSituacaoCadastral: r.data_situacao_cadastral, motivoSituacao: r.motivo_situacao_cadastral, campaignStatus: r.campaign_status || 'pending', aiActive: r.ai_active === 1, wa_id: r.wa_id })));
   });
 });
 
