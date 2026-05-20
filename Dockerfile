@@ -1,6 +1,8 @@
 # Stage 1: Build the React application
 FROM node:18-slim AS builder
 
+RUN apt-get update && apt-get install -y python3 build-essential
+
 WORKDIR /app
 
 # Install dependencies
@@ -19,7 +21,7 @@ FROM node:18-slim
 # Install Google Chrome Stable and fonts
 # Necessary for Puppeteer to run reliably
 RUN apt-get update \
-    && apt-get install -y wget gnupg \
+    && apt-get install -y wget gnupg python3 build-essential \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
     && sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
     && apt-get update \
