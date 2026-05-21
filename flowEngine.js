@@ -141,19 +141,17 @@ async function executeNode(callbacks, node, leadData, userInput, edges, nodes) {
     if (type === 'ai') {
         if (!userInput) {
             // The instructions for AI node say: it evaluates user response. So it expects a response before this node!
-            // Wait, does it prompt first? If it has a label, maybe send label as prompt.
-            // Let's send the text if it exists.
-            if (data.label && data.label.trim().length > 0) {
-                 const text = hydrateStr(data.label);
-                 await sendMessage(leadData.wa_id, text);
-            }
             return { wait: true };
         } else {
              // Evaluate user input via AI router
              const options = data.options || [];
              if (options.length === 0) return { nextNodeId, delay: 500 };
              
-             let prompt = `Avalie a seguinte mensagem do usuário no contexto e escolha a opção que melhor se encaixa.\nContexto: O usuário respondeu: "${userInput}"\n\nOpções disponíveis:\n`;
+             let prompt = `Avalie a seguinte mensagem do usuário no contexto e escolha a opção que melhor se encaixa.
+Instrução do contexto: "${hydrateStr(data.label)}"
+Mensagem do usuário: "${userInput}"
+Opções disponíveis:
+`;
              options.forEach((opt, idx) => prompt += `[${idx+1}] ${opt.label}\n`);
              prompt += `\nRetorne EXATAMENTE APENAS O NÚMERO da melhor opção. (ex: "1" ou "2"). Caso nenhuma se aplique perfeitamente, retorne "fallback".`;
              

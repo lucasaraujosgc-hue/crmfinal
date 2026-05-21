@@ -882,6 +882,32 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
 
+async function askAI(prompt, aiConfig) {
+    if (!aiConfig) return "";
+    try {
+        if (aiConfig.provider === 'groq') {
+            const groq = new Groq({ apiKey: aiConfig.apiKeys?.groq });
+            const chatCompletion = await groq.chat.completions.create({
+                messages: [{ role: "user", content: prompt }],
+                model: aiConfig.model || "llama3-8b-8192",
+                temperature: 0.3
+            });
+            return chatCompletion.choices[0]?.message?.content || "";
+        } else {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || aiConfig.apiKeys?.gemini || "" });
+            const response = await ai.models.generateContent({ 
+                model: aiConfig.model || 'gemini-3-flash-preview',
+                contents: [{ parts: [{ text: prompt }] }],
+                config: { temperature: 0.3 }
+            });
+            return response.text || "";
+        }
+    } catch (err) {
+        console.error("Erro no askAI:", err);
+        return "";
+    }
+}
+
 // API Endpoints para Scraping
 app.post('/start-processing', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
