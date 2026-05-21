@@ -355,18 +355,26 @@ client.on('message', async (msg) => {
             if (company.campaign_status === 'flow_active' && company.current_node_id && company.campaign_id) {
                 db.get('SELECT * FROM campaign WHERE id = ?', [company.campaign_id], (err, campaignData) => {
                     if (err || !campaignData) return;
-                    
-                    // Usa msg.from como destino de resposta — é o chat ID real da conversa,
-                    // evita enviar para @lid armazenado no banco (que quebra o sendMedia)
-                    const replyTo = msg.from;
-                    
+
+                    // Helper: envia para o chat correto mesmo quando msg.from é @lid.
+                    // client.sendMessage(id, ...) falha com @lid no Puppeteer porque não
+                    // consegue resolver o chat pelo JID. msg.getChat() retorna o objeto Chat
+                    // diretamente, sem precisar resolver o JID — funciona para @lid e @c.us.
+                    const safeSend = async (content, options = {}) => {
+                        if (msg.from.includes('@lid')) {
+                            const chat = await msg.getChat();
+                            return chat.sendMessage(content, options);
+                        }
+                        return client.sendMessage(msg.from, content, options);
+                    };
+
                     const callbacks = {
-                        sendMessage: (to, m) => client.sendMessage(replyTo, m),
+                        sendMessage: async (to, m) => safeSend(m),
                         sendMedia: async (to, mediaBase64, caption) => {
                             const pkgMedia = await import('whatsapp-web.js');
                             const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
-                            const m = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
-                            await client.sendMessage(replyTo, m, { caption });
+                            const media = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
+                            return safeSend(media, { caption });
                         },
                         askAi: async (prompt) => askAI(prompt, aiConfig),
                         log: logSystem
@@ -612,7 +620,12 @@ ${ruleContext}
 
                     // Delay humano para naturalidade
                     setTimeout(async () => {
-                        await client.sendMessage(msg.from, finalText);
+                        if (msg.from.includes('@lid')) {
+                            const chat = await msg.getChat();
+                            await chat.sendMessage(finalText);
+                        } else {
+                            await client.sendMessage(msg.from, finalText);
+                        }
                         logSystem('ai_success', 'whatsapp', `Resposta enviada para ${company.razao_social}`, { resposta: finalText });
                         db.run(`UPDATE resultado SET campaign_status = 'replied', last_contacted = ? WHERE id = ?`, [new Date().toISOString(), company.id]);
                     }, 3000 + (Math.random() * 2000));
