@@ -50,7 +50,7 @@ async function processFlowNode(callbacks, db, leadData, campaignData, nodeId, us
         db.run('UPDATE resultado SET current_node_id = ? WHERE id = ?', [currentNodeId, leadData.id]);
     } else {
         // Flow finished
-        db.run('UPDATE resultado SET current_node_id = NULL, campaign_status = "flow_finished" WHERE id = ?', [leadData.id]);
+        db.run(`UPDATE resultado SET current_node_id = NULL, campaign_status = 'flow_finished' WHERE id = ?`, [leadData.id]);
     }
 }
 
