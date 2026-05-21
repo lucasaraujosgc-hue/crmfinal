@@ -87,8 +87,6 @@ const Badge: React.FC<BadgeProps> = ({ children, variant = 'default' }) => {
   );
 };
 
-// Removed StatusBadge as it's not used anymore.
-
 // --- Componentes Funcionais Reutilizáveis ---
 
 // Barra de Filtros Compactada
@@ -164,9 +162,9 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
     
     return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[75vh]">
             <table className="w-full text-left border-collapse text-sm">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-slate-50">
                     <tr className="bg-slate-50 border-b border-slate-200 divide-x divide-slate-100">
                         {selectable && (
                             <th className="px-4 py-3 w-10 text-center align-top">
@@ -208,6 +206,7 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                         </th>
                         <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
                             Status Contato
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.statusContato} onChange={(v: string) => setColFilters({...colFilters, statusContato: v})} />}
                         </th>
                         {(onChat || onViewDetails || onToggleAi) && <th className="px-4 py-2 font-semibold text-slate-600 align-top w-20"></th>}
                     </tr>
@@ -348,7 +347,6 @@ import { FlowEditorModal } from './src/components/FlowEditorModal';
 
 // --- INITIAL STATES ---
 
-// ... (code)
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -400,6 +398,8 @@ const App: React.FC = () => {
   });
 
   const [isCampaignFlowEditorOpen, setIsCampaignFlowEditorOpen] = useState(false);
+
+  // ── Column Filters (includes statusContato) ──────────────────────────────
   const [colFilters, setColFilters] = useState({
       inscricao: '',
       cnpj: '',
@@ -407,7 +407,8 @@ const App: React.FC = () => {
       municipio: '',
       situacao: '',
       pagamento: '',
-      motivo: ''
+      motivo: '',
+      statusContato: ''   // ← novo filtro
   });
 
   // AI & Knowledge
@@ -683,6 +684,7 @@ const App: React.FC = () => {
     }
   };
 
+  // ── filteredCompanies (inclui fStatusContato) ────────────────────────────
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {
       const searchTxt = filters.search?.replace(/\D/g, '') || filters.search?.toLowerCase() || '';
@@ -704,7 +706,18 @@ const App: React.FC = () => {
       const fPagamento = !colFilters.pagamento || c.formaPagamento?.toLowerCase().includes(colFilters.pagamento.toLowerCase());
       const fMotivo = !colFilters.motivo || c.motivoSituacao?.toLowerCase().includes(colFilters.motivo.toLowerCase());
 
-      return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch && accMatch && fInscricao && fCnpj && fRazao && fMunicipio && fSituacao && fPagamento && fMotivo;
+      // ── filtro Status Contato ──────────────────────────────────────────────
+      const statusContatoLabel = c.campaignStatus
+        ? (c.campaignStatus === 'flow_active' ? 'Em Fluxo (IA)' :
+           c.campaignStatus === 'flow_finished' ? 'Fluxo Concluído' :
+           c.campaignStatus)
+        : 'Não contatado';
+      const fStatusContato = !colFilters.statusContato ||
+        statusContatoLabel.toLowerCase().includes(colFilters.statusContato.toLowerCase());
+
+      return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch && accMatch
+          && fInscricao && fCnpj && fRazao && fMunicipio && fSituacao && fPagamento && fMotivo
+          && fStatusContato;
     });
   }, [companies, filters, colFilters]);
 
@@ -1034,8 +1047,6 @@ const App: React.FC = () => {
                                          </div>
                                      </div>
                                      
-                                     <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} totalResults={filteredCompanies.length} />
-                                     
                                      <div className="flex-1 bg-white border border-slate-200 rounded-lg overflow-hidden">
                                          <div className="h-[400px] overflow-y-auto">
                                             <CompanyTable 
@@ -1103,7 +1114,7 @@ const App: React.FC = () => {
                                      Próximo <ArrowRight size={16} />
                                  </button>
                              ) : (
-                                 <button onClick={createCampaign} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-bold flex items-center gap-2 transition-colors">
+                                 <button onClick={createCampaign} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium flex items-center gap-2 transition-colors">
                                      <Play size={16} fill="currentColor" /> Disparar Campanha
                                  </button>
                              )}
@@ -1116,7 +1127,6 @@ const App: React.FC = () => {
           {/* LEADS TAB */}
           {activeTab === 'leads' && (
             <div className="max-w-6xl mx-auto space-y-6 pb-12">
-                <FilterBar filters={filters} setFilters={setFilters} availableCities={availableCities} availableReasons={availableReasons} totalResults={filteredCompanies.length} />
                 <CompanyTable 
                     companies={filteredCompanies} 
                     selectedIds={selectedIds} 
@@ -1466,7 +1476,6 @@ const App: React.FC = () => {
           {activeTab === 'whatsapp' && (
             <div className="flex h-full gap-6 mx-auto">
                 {waSession.status !== 'connected' ? (
-                   // QR CODE DISPLAY IF NOT CONNECTED
                    <div className="w-full flex-1 flex items-center justify-center p-6">
                       <div className="bg-white p-8 rounded-lg shadow-sm border border-slate-200 text-center max-w-sm w-full">
                           <h2 className="text-xl font-semibold text-slate-800 mb-1">Conectar WhatsApp</h2>
@@ -1498,7 +1507,6 @@ const App: React.FC = () => {
                       </div>
                    </div>
                 ) : (
-                // EXISTING CHAT UI IF CONNECTED
                 <>
                 {/* Conversations Sidebar */}
                 <div className="w-80 flex flex-col bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
