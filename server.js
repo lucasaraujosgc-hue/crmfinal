@@ -1,4 +1,3 @@
-
 import './polyfill.js';
 import 'dotenv/config';
 import express from 'express';
@@ -235,10 +234,18 @@ client.on('message', async (msg) => {
     let waId = msg.from;
     
     // Tenta resolver o @lid para o número real se possível
+    // IMPORTANTE: lids têm 15+ dígitos; telefones reais têm no máximo 13 (55+DDD+número)
+    // Se contact.number retornar o próprio lid, ignoramos e mantemos msg.from
     try {
         const contact = await msg.getContact();
         if (contact && contact.number) {
-            waId = `${contact.number}@c.us`;
+            const numStr = String(contact.number).replace(/\D/g, '');
+            if (numStr.length <= 13) {
+                // Parece um telefone real — usa normalmente
+                waId = `${numStr}@c.us`;
+            } else {
+                logSystem('warning', 'whatsapp', `getContact() retornou número suspeito (lid disfarçado?): ${contact.number} — mantendo msg.from`);
+            }
         }
     } catch (e) {
         logSystem('error', 'whatsapp', 'Erro ao pegar contato', { error: e.message });
@@ -349,13 +356,17 @@ client.on('message', async (msg) => {
                 db.get('SELECT * FROM campaign WHERE id = ?', [company.campaign_id], (err, campaignData) => {
                     if (err || !campaignData) return;
                     
+                    // Usa msg.from como destino de resposta — é o chat ID real da conversa,
+                    // evita enviar para @lid armazenado no banco (que quebra o sendMedia)
+                    const replyTo = msg.from;
+                    
                     const callbacks = {
-                        sendMessage: (to, m) => client.sendMessage(to, m),
+                        sendMessage: (to, m) => client.sendMessage(replyTo, m),
                         sendMedia: async (to, mediaBase64, caption) => {
                             const pkgMedia = await import('whatsapp-web.js');
                             const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
                             const m = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
-                            await client.sendMessage(to, m, { caption });
+                            await client.sendMessage(replyTo, m, { caption });
                         },
                         askAi: async (prompt) => askAI(prompt, aiConfig),
                         log: logSystem
@@ -673,12 +684,13 @@ function startCampaignSending(campaignId, message) {
 
                     if (hasCustomFlow) {
                         const callbacks = {
-                            sendMessage: (to, msg) => client.sendMessage(to, msg),
+                            // Usa finalWaId (@c.us) para envio real — storeWaId pode ser @lid que quebra sendMedia
+                            sendMessage: (to, msg) => client.sendMessage(finalWaId, msg),
                             sendMedia: async (to, mediaBase64, caption) => {
                                 const pkgMedia = await import('whatsapp-web.js');
                                 const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
                                 const m = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
-                                await client.sendMessage(to, m, { caption });
+                                await client.sendMessage(finalWaId, m, { caption });
                             },
                             askAi: async (prompt) => askAI(prompt, aiConfig),
                             log: logSystem
