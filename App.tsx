@@ -206,6 +206,9 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                             Motivo da Situação
                             {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.motivo} onChange={(v: string) => setColFilters({...colFilters, motivo: v})} />}
                         </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
+                            Status Contato
+                        </th>
                         {(onChat || onViewDetails || onToggleAi) && <th className="px-4 py-2 font-semibold text-slate-600 align-top w-20"></th>}
                     </tr>
                 </thead>
@@ -236,6 +239,27 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                                 <p className="text-xs text-slate-600 line-clamp-2" title={lead.motivoSituacao}>
                                     {cleanReasonText(lead.motivoSituacao) || '-'}
                                 </p>
+                            </td>
+                            <td className="px-4 py-3">
+                                {lead.campaignStatus ? (
+                                    <div className="flex flex-col gap-1 items-start">
+                                        <Badge variant={
+                                            ['sent', 'delivered', 'read'].includes(lead.campaignStatus) ? 'brand' :
+                                            ['replied', 'interested', 'flow_finished'].includes(lead.campaignStatus) ? 'success' :
+                                            ['error'].includes(lead.campaignStatus) ? 'danger' : 'default'
+                                        }>
+                                            {lead.campaignStatus === 'flow_active' ? 'Em Fluxo (IA)' : 
+                                             lead.campaignStatus === 'flow_finished' ? 'Fluxo Concluído' :
+                                             lead.campaignStatus}
+                                        </Badge>
+                                        <div className="flex flex-col">
+                                            {lead.campaignName && <span className="text-[10px] text-brand-600 font-semibold truncate max-w-[120px]" title={lead.campaignName}>{lead.campaignName}</span>}
+                                            {lead.lastContacted && <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">Desde: {new Date(Number(lead.lastContacted)).toLocaleDateString()}</span>}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <span className="text-xs text-slate-400 italic">Não contatado</span>
+                                )}
                             </td>
                             {(onChat || onViewDetails || onToggleAi) && (
                                 <td className="px-4 py-3 text-right">
@@ -657,6 +681,7 @@ const App: React.FC = () => {
     } catch (e: any) {
       alert('Erro ao criar campanha: ' + (e?.message || 'Tente novamente.'));
     }
+  };
 
   const filteredCompanies = useMemo(() => {
     return companies.filter(c => {

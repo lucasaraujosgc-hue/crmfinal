@@ -51,6 +51,7 @@ export interface CompanyResult {
   lastMessageSent?: string;
   aiAnalysis?: string;
   aiActive?: boolean; 
+  campaignName?: string;
 }
 
 export interface ProcessingStats {

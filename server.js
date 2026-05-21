@@ -1072,7 +1072,10 @@ app.get('/api/unique-filters', (req, res) => {
 });
 
 app.get('/get-all-results', (req, res) => {
-  db.all('SELECT * FROM resultado ORDER BY id DESC', (err, rows) => {
+  db.all(`SELECT r.*, c.name as campaign_name 
+          FROM resultado r 
+          LEFT JOIN campaign c ON r.campaign_id = c.id 
+          ORDER BY r.id DESC`, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.map(r => ({ 
         ...r, 
@@ -1089,9 +1092,10 @@ app.get('/get-all-results', (req, res) => {
         situacaoCadastral: r.situacao_cadastral, 
         dataSituacaoCadastral: r.data_situacao_cadastral, 
         motivoSituacao: r.motivo_situacao_cadastral, 
-        campaignStatus: r.campaign_status || 'pending', 
+        campaignStatus: r.campaign_status, 
         aiActive: r.ai_active === 1, 
-        wa_id: r.wa_id 
+        wa_id: r.wa_id,
+        campaignName: r.campaign_name
     })));
   });
 });

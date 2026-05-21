@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { ReactFlow, Controls, Background, addEdge, BackgroundVariant, applyNodeChanges, applyEdgeChanges, Handle, Position } from '@xyflow/react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { ReactFlow, Controls, Background, addEdge, BackgroundVariant, applyNodeChanges, applyEdgeChanges, Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { X, Save, MessageCircle, Clock, List, FileText, Image, Mic, Bot, Upload, CheckCircle } from 'lucide-react';
 
@@ -13,10 +13,17 @@ const nodeTypesConfig = [
   { type: 'ticket', label: 'Ticket', icon: FileText, color: 'border-indigo-400 bg-indigo-50 text-indigo-700' }
 ];
 
-const FlowNode = ({ data, type, isConnectable }: any) => {
+const FlowNode = ({ id, data, type, isConnectable }: any) => {
     const config = nodeTypesConfig.find(c => c.type === type) || nodeTypesConfig[0];
     const Icon = config.icon;
     const hasOptions = type === 'menu' || type === 'ai';
+    
+    const updateNodeInternals = useUpdateNodeInternals();
+    const optionsLength = data?.options?.length || 0;
+    useEffect(() => {
+        updateNodeInternals(id);
+    }, [optionsLength, id, updateNodeInternals]);
+
     
     return (
         <div className={`shadow-sm rounded-lg bg-white border border-slate-300 ${config.color.split(' ')[0]} min-w-[140px] max-w-[170px] text-slate-800`}>
@@ -58,7 +65,7 @@ const FlowNode = ({ data, type, isConnectable }: any) => {
                         {data.options.map((opt: any, i: number) => (
                             <div key={i} className="text-[9px] bg-slate-50 border border-slate-100 rounded px-1 py-0.5 flex items-center justify-between">
                                 <span className="truncate max-w-[90%]">[{i+1}] {opt.label}</span>
-                                <Handle type="source" position={Position.Right} id={`opt-${i}`} className="w-1.5 h-1.5" />
+                                <Handle type="source" position={Position.Right} id={`opt-${i}`} className="w-1.5 h-1.5" style={{ position: 'relative', right: 0, transform: 'none', top: 'auto', bottom: 'auto' }} />
                             </div>
                         ))}
                     </div>
