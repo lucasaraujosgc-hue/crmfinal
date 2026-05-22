@@ -796,7 +796,14 @@ const App: React.FC = () => {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Bot size={16} className={aiConfig.aiActive ? "text-emerald-400" : "text-slate-500"} />
-                    {isSidebarOpen && <span className="text-xs font-medium text-slate-300">IA Geral</span>}
+                    {isSidebarOpen && (
+                        <div>
+                            <span className="text-xs font-medium text-slate-300">IA Conversacional</span>
+                            {!aiConfig.aiActive && (
+                                <span className="block text-[10px] text-slate-500">Flows ativos</span>
+                            )}
+                        </div>
+                    )}
                 </div>
                 <button onClick={() => saveAiConfig({...aiConfig, aiActive: !aiConfig.aiActive})} className={`w-8 h-4 rounded-full p-0.5 transition-colors ${aiConfig.aiActive ? 'bg-emerald-500' : 'bg-slate-700'}`}>
                     <div className={`w-3 h-3 bg-white rounded-full transition-transform ${aiConfig.aiActive ? 'translate-x-4' : 'translate-x-0'}`}></div>
