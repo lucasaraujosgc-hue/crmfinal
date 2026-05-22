@@ -270,24 +270,25 @@ client.on('message', async (msg) => {
         logSystem('info', 'whatsapp', 'Áudio recebido, iniciando transcrição...');
         try {
             const media = await msg.downloadMedia();
-            if (aiConfig.apiKeys?.groq) {
-                const groq = new Groq({ apiKey: aiConfig.apiKeys.groq });
-                // Transformar base64 em arquivo
-                const tmpPath = path.join(UPLOADS_DIR, `audio_${Date.now()}.${media.mimetype.split('/')[1].split(';')[0] || 'ogg'}`);
-                fs.writeFileSync(tmpPath, Buffer.from(media.data, 'base64'));
+            if (aiConfig.apiKeys?.gemini || process.env.API_KEY) {
+                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || aiConfig.apiKeys?.gemini || "" });
                 
-                const transcription = await groq.audio.transcriptions.create({
-                    file: fs.createReadStream(tmpPath),
-                    model: "whisper-large-v3",
-                    prompt: "A audio from a client.",
-                    response_format: "json",
-                    language: "pt",
+                // Gemini suporta áudio nativamente, podemos usar o buffer em base64 direto
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: [{
+                        role: 'user',
+                        parts: [
+                            { text: "Transcreva o áudio a seguir. Responda APENAS com a transcrição exata e detalhada do que foi dito, sem aspas ou textos de introdução na sua resposta." },
+                            { inlineData: { mimeType: media.mimetype.split(';')[0], data: media.data } }
+                        ]
+                    }]
                 });
-                userMessageBody = `[ÁUDIO TRANSCRITO]: "${transcription.text}"`;
-                fs.unlinkSync(tmpPath); // Clean up
+                
+                userMessageBody = `[ÁUDIO TRANSCRITO]: "${response.text?.trim()}"`;
             } else {
-                userMessageBody = '[Mensagem de Áudio não transcrita por falta de Groq API Key]';
-                logSystem('warning', 'whatsapp', 'Chave GRoq não configurada para transcrever áudio.');
+                userMessageBody = '[Mensagem de Áudio não transcrita por falta de API Key do Gemini]';
+                logSystem('warning', 'whatsapp', 'Chave do Gemini não configurada para transcrever áudio.');
             }
         } catch (e) {
             logSystem('error', 'whatsapp', 'Erro ao processar áudio', { error: e.message });

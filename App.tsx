@@ -133,6 +133,10 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                             {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.razao} onChange={(v: string) => setColFilters({...colFilters, razao: v})} />}
                         </th>
                         <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
+                            Telefone
+                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.telefone} onChange={(v: string) => setColFilters({...colFilters, telefone: v})} />}
+                        </th>
+                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
                             Município
                             {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.municipio} onChange={(v: string) => setColFilters({...colFilters, municipio: v})} />}
                         </th>
@@ -173,6 +177,7 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                             <td className="px-4 py-3">
                                 <p className="font-medium text-slate-900 truncate max-w-[200px]" title={lead.razaoSocial}>{lead.razaoSocial}</p>
                             </td>
+                            <td className="px-4 py-3 text-slate-700">{lead.telefone || '-'}</td>
                             <td className="px-4 py-3 text-slate-700">{lead.municipio}</td>
                             <td className="px-4 py-3">
                                 <Badge variant={lead.situacaoCadastral?.includes('ATIVA') ? 'success' : 'danger'}>{lead.situacaoCadastral}</Badge>
@@ -352,7 +357,8 @@ const App: React.FC = () => {
       situacao: '',
       pagamento: '',
       motivo: '',
-      statusContato: ''   // ← novo filtro
+      statusContato: '',   // ← novo filtro
+      telefone: ''
   });
 
   // AI & Knowledge
@@ -649,6 +655,7 @@ const App: React.FC = () => {
       const fSituacao = !colFilters.situacao || c.situacaoCadastral?.toLowerCase().includes(colFilters.situacao.toLowerCase());
       const fPagamento = !colFilters.pagamento || c.formaPagamento?.toLowerCase().includes(colFilters.pagamento.toLowerCase());
       const fMotivo = !colFilters.motivo || c.motivoSituacao?.toLowerCase().includes(colFilters.motivo.toLowerCase());
+      const fTelefone = !colFilters.telefone || (c.telefone || '').replace(/\D/g, '').includes(colFilters.telefone.replace(/\D/g, ''));
 
       // ── filtro Status Contato ──────────────────────────────────────────────
       const statusContatoLabel = c.campaignStatus
@@ -661,7 +668,7 @@ const App: React.FC = () => {
 
       return searchMatch && cityMatch && reasonMatch && waMatch && phoneMatch && accMatch
           && fInscricao && fCnpj && fRazao && fMunicipio && fSituacao && fPagamento && fMotivo
-          && fStatusContato;
+          && fStatusContato && fTelefone;
     });
   }, [companies, filters, colFilters]);
 
