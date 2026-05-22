@@ -89,62 +89,6 @@ const Badge: React.FC<BadgeProps> = ({ children, variant = 'default' }) => {
 
 // --- Componentes Funcionais Reutilizáveis ---
 
-// Barra de Filtros Compactada
-const FilterBar = ({ filters, setFilters, availableCities, availableReasons, onRefresh, totalResults }: any) => (
-    <div className="flex flex-col xl:flex-row gap-4 items-center justify-between bg-white border border-slate-200 p-4 rounded-lg shadow-sm mb-6">
-        <div className="flex-1 relative w-full">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input 
-                type="text" 
-                className="w-full pl-12 pr-4 py-3 border border-slate-300 rounded-md text-base focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all placeholder:text-slate-400 font-medium"
-                placeholder="Filtrar por Razão Social, CNPJ, ou Telefone..."
-                value={filters.search}
-                onChange={e => setFilters({...filters, search: e.target.value})}
-            />
-        </div>
-        <div className="flex items-center gap-3 w-full xl:w-auto overflow-x-auto pb-2 xl:pb-0">
-            <select className="border border-slate-200 bg-white rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-brand-500 min-w-[140px]"
-                value={filters.city} onChange={e => setFilters({...filters, city: e.target.value})}>
-                <option value="">Todas Cidades</option>
-                {availableCities.map((c: string) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            
-            <select className="border border-slate-200 bg-white rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-brand-500 min-w-[140px]"
-                value={filters.reason} onChange={e => setFilters({...filters, reason: e.target.value})}>
-                <option value="">Todos Motivos</option>
-                {availableReasons.map((r: string) => <option key={r} value={r}>{r}</option>)}
-            </select>
-
-            <select className="border border-slate-200 bg-white rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-brand-500 min-w-[140px]"
-                value={filters.statusWa} onChange={e => setFilters({...filters, statusWa: e.target.value})}>
-                <option value="all">Status Zap</option>
-                <option value="pending">Pendente</option>
-                <option value="sent">Enviado</option>
-                <option value="replied">Respondido</option>
-                <option value="interested">Quente</option>
-            </select>
-            
-            <select className="border border-slate-200 bg-white rounded-md px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-brand-500 min-w-[140px]"
-                value={filters.hasAccountant || 'all'} onChange={e => setFilters({...filters, hasAccountant: e.target.value})}>
-                <option value="all">Contador?</option>
-                <option value="yes">Possui</option>
-                <option value="no">Sem Contador</option>
-            </select>
-            
-            {onRefresh && (
-                <button onClick={onRefresh} className="p-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 rounded-md transition-colors flex items-center justify-center">
-                    <RefreshCw size={16} />
-                </button>
-            )}
-        </div>
-        {totalResults !== undefined && (
-             <div className="px-3 py-1.5 bg-slate-100 rounded-md font-medium text-slate-600 text-xs whitespace-nowrap">
-                 {totalResults} LEADS
-             </div>
-        )}
-    </div>
-);
-
 const FilterInput = ({ placeholder, value, onChange }: any) => (
     <div className="mt-1">
         <input 
@@ -364,7 +308,7 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<any[]>([]);
 
   // Filters State
-  const [filters, setFilters] = useState({
+  const [filters] = useState({
     search: '',
     city: '',
     reason: '',
@@ -373,7 +317,7 @@ const App: React.FC = () => {
     hasPhone: 'all'
   });
   
-  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [_availableCities, setAvailableCities] = useState<string[]>([]);
   const [availableReasons, setAvailableReasons] = useState<string[]>([]);
 
   // Selection & UI Helpers
@@ -1241,7 +1185,7 @@ const App: React.FC = () => {
                                             onChange={e => setEditingRule({...editingRule, motivoSituacao: e.target.value})} 
                                         >
                                             <option value="" disabled hidden>SELECIONE UM MOTIVO...</option>
-                                            {availableReasons.map((reason, idx) => <option key={idx} value={reason}>{reason}</option>)}
+                                            {availableReasons.map((reason: string, idx: number) => <option key={idx} value={reason}>{reason}</option>)}
                                         </select>
                                         <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                     </div>
