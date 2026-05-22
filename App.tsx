@@ -794,6 +794,12 @@ const App: React.FC = () => {
     }
   };
 
+  const activeChatCompany = useMemo(() => {
+      if (!activeChat) return null;
+      const cleanChatId = activeChat.replace(/\D/g, '');
+      return companies.find(c => c.telefone?.replace(/\D/g, '').includes(cleanChatId) || cleanChatId.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
+  }, [activeChat, companies]);
+
   if (isAuthenticated === null) return <div className="min-h-screen bg-slate-50"></div>;
 
   if (!isAuthenticated) {
@@ -801,12 +807,6 @@ const App: React.FC = () => {
   }
 
   // --- Renderização ---
-
-  const activeChatCompany = useMemo(() => {
-      if (!activeChat) return null;
-      const cleanChatId = activeChat.replace(/\D/g, '');
-      return companies.find(c => c.telefone?.replace(/\D/g, '').includes(cleanChatId) || cleanChatId.includes(c.telefone?.replace(/\D/g, '') || 'XXX'));
-  }, [activeChat, companies]);
 
   return (
     <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sans selection:bg-brand-100 selection:text-brand-900">
