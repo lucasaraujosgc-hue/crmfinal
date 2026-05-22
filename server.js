@@ -257,11 +257,6 @@ client.on('message', async (msg) => {
         return; 
     }
 
-    if (!aiConfig.aiActive) {
-        logSystem('ai_skip', 'engine', 'IA Global está desativada nas configurações');
-        return;
-    }
-
     if (isAutoReply(msg.body)) {
         logSystem('ai_skip', 'engine', 'Detectada mensagem automática/saudação genérica', { body: msg.body });
         return;
@@ -390,6 +385,21 @@ client.on('message', async (msg) => {
                 logSystem('ai_skip', 'engine', `IA desativada especificamente para este lead: ${company.razao_social}`);
                 return;
             }
+
+            // ── GUARD: IA Conversacional Global ─────────────────────────────────
+            // Flows, roteadores e classificações leves já foram tratados acima.
+            // Daqui para baixo só entra a IA conversacional pesada:
+            //   RAG / contexto jurídico, knowledgeRules, strictInstruction,
+            //   persona avançada, memória longa e chamadas LLM contextuais.
+            // Quando aiActive=false o sistema mantém flows e automações rodando
+            // normalmente, mas bloqueia toda resposta contextual livre.
+            if (!aiConfig.aiActive) {
+                logSystem('ai_skip', 'engine', 'IA Conversacional Global desativada — flows continuam ativos', {
+                    lead: company.razao_social
+                });
+                return;
+            }
+            // ────────────────────────────────────────────────────────────────────
 
             // Atualiza wa_id se necessário
             if (company.wa_id !== waId) {
