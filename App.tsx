@@ -296,7 +296,114 @@ import { FlowEditorModal } from './src/components/FlowEditorModal';
 
 // --- INITIAL STATES ---
 
+const LoginScreen = ({ onLogin }: { onLogin: (password: string, rememberMe: boolean) => void }) => {
+    const [password, setPassword] = useState('');
+    const [rememberMe, setRememberMe] = useState(false);
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const data = await res.json();
+            if (data.success) {
+                onLogin(password, rememberMe);
+            } else {
+                setError(data.error || 'Senha incorreta');
+            }
+        } catch (err) {
+            setError('Erro de conexão');
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+            <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border border-slate-100">
+                <div className="flex flex-col items-center mb-8">
+                    <div className="w-12 h-12 bg-brand-600 rounded-lg flex items-center justify-center text-white mb-4 shadow-md">
+                        <Terminal size={24} />
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-800">CRM Vírgula</h1>
+                    <p className="text-slate-500 mt-1">Acesse sua conta para continuar</p>
+                </div>
+                
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Senha de Acesso</label>
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"
+                            placeholder="Digite sua senha"
+                            required
+                        />
+                    </div>
+                    
+                    <div className="flex items-center">
+                        <input
+                            id="remember"
+                            type="checkbox"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            className="w-4 h-4 text-brand-600 border-gray-300 rounded focus:ring-brand-500"
+                        />
+                        <label htmlFor="remember" className="ml-2 text-sm text-slate-600 select-none">
+                            Permanecer conectado
+                        </label>
+                    </div>
+
+                    {error && (
+                        <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg flex items-center gap-2">
+                            <AlertCircle size={16} />
+                            {error}
+                        </div>
+                    )}
+
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium transition-colors focus:ring-4 focus:ring-brand-200 disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                    >
+                        {loading ? 'Entrando...' : 'Entrar'}
+                        {!loading && <ArrowRight size={18} />}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 const App: React.FC = () => {
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+    useEffect(() => {
+        const token = localStorage.getItem('crm-auth-token') || sessionStorage.getItem('crm-auth-token');
+        if (token === 'crm-auth-token') {
+            setIsAuthenticated(true);
+        } else {
+            setIsAuthenticated(false);
+        }
+    }, []);
+
+    const handleLogin = (_password: string, rememberMe: boolean) => {
+        const token = 'crm-auth-token';
+        if (rememberMe) {
+            localStorage.setItem('crm-auth-token', token);
+        } else {
+            sessionStorage.setItem('crm-auth-token', token);
+        }
+        setIsAuthenticated(true);
+    };
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
@@ -686,6 +793,12 @@ const App: React.FC = () => {
       setSelectedIds(new Set(filteredCompanies.map(c => c.id)));
     }
   };
+
+  if (isAuthenticated === null) return <div className="min-h-screen bg-slate-50"></div>;
+
+  if (!isAuthenticated) {
+      return <LoginScreen onLogin={handleLogin} />;
+  }
 
   // --- Renderização ---
 

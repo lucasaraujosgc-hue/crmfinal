@@ -1381,4 +1381,13 @@ app.post('/api/cleanup', (req, res) => {
     });
 });
 
+app.post('/api/login', (req, res) => {
+    const { password } = req.body;
+    if (password === process.env.PASSWORD) {
+        res.json({ success: true, token: 'crm-auth-token' });
+    } else {
+        res.status(401).json({ success: false, error: 'Senha incorreta' });
+    }
+});
+
 app.listen(port, '0.0.0.0', () => console.log(`Server running at http://0.0.0.0:${port}`));
