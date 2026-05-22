@@ -227,7 +227,7 @@ client.on('ready', () => {
     logSystem('info', 'whatsapp', 'Cliente WhatsApp conectado e pronto'); 
 });
 
-// --- LÓGICA DE MENSAGENS E ASSOCIAÇÃO const messageBuffers = new Map();
+const messageBuffers = new Map();
 
 // --- LÓGICA DE MENSAGENS E ASSOCIAÇÃO PROFUNDA ---
 client.on('message', async (msg) => {
