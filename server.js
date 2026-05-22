@@ -414,8 +414,26 @@ async function processBufferedMessages(waId, lastMsg) {
                         sendMedia: async (to, mediaBase64, caption) => {
                             const pkgMedia = await import('whatsapp-web.js');
                             const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
-                            const media = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
-                            return safeSend(media, { caption });
+
+                            let mimeType = 'image/jpeg';
+                            let data = mediaBase64.split(',')[1] || mediaBase64;
+                            let filename = 'image.jpg';
+                            
+                            if (mediaBase64.startsWith('data:')) {
+                                mimeType = mediaBase64.substring(5, mediaBase64.indexOf(';'));
+                                let ext = mimeType.split('/')[1] || 'bin';
+                                if (ext.includes(';')) ext = ext.split(';')[0];
+                                filename = 'media.' + ext;
+                            }
+                            
+                            const media = new MessageMedia(mimeType, data, filename);
+                            const options = { caption };
+                            
+                            if (mimeType.startsWith('audio/')) {
+                                options.sendAudioAsVoice = true; // Simulates WhatsApp audio.
+                            }
+                            
+                            return safeSend(media, options);
                         },
                         askAi: async (prompt) => askAI(prompt, aiConfig),
                         log: logSystem
@@ -728,8 +746,26 @@ function startCampaignSending(campaignId, message) {
                             sendMedia: async (to, mediaBase64, caption) => {
                                 const pkgMedia = await import('whatsapp-web.js');
                                 const MessageMedia = pkgMedia.default ? pkgMedia.default.MessageMedia : pkgMedia.MessageMedia;
-                                const m = new MessageMedia('image/jpeg', mediaBase64.split(',')[1] || mediaBase64, 'image.jpg');
-                                await client.sendMessage(finalWaId, m, { caption });
+
+                                let mimeType = 'image/jpeg';
+                                let data = mediaBase64.split(',')[1] || mediaBase64;
+                                let filename = 'image.jpg';
+                                
+                                if (mediaBase64.startsWith('data:')) {
+                                    mimeType = mediaBase64.substring(5, mediaBase64.indexOf(';'));
+                                    let ext = mimeType.split('/')[1] || 'bin';
+                                    if (ext.includes(';')) ext = ext.split(';')[0];
+                                    filename = 'media.' + ext;
+                                }
+                                
+                                const media = new MessageMedia(mimeType, data, filename);
+                                const options = { caption };
+                                
+                                if (mimeType.startsWith('audio/')) {
+                                    options.sendAudioAsVoice = true; // Simulates WhatsApp audio.
+                                }
+                                
+                                await client.sendMessage(finalWaId, media, options);
                             },
                             askAi: async (prompt) => askAI(prompt, aiConfig),
                             log: logSystem
