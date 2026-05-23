@@ -461,7 +461,9 @@ async function processBufferedMessages(waId, lastMsg) {
                 return releaseLock();
             }
 
-            if (company.wa_id !== waId) {
+            if (company.campaign_status === 'sent' || company.campaign_status === 'pending') {
+                db.run('UPDATE resultado SET campaign_status = \'replied\', wa_id = ? WHERE id = ?', [waId, company.id]);
+            } else if (company.wa_id !== waId) {
                 db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [waId, company.id]);
             }
 
@@ -1328,13 +1330,14 @@ app.post('/api/whatsapp/send', async (req, res) => {
     const { chatId, message, leadId } = req.body;
     try {
         let targetId = chatId;
+        let storeWaId = targetId;
         if (leadId) {
             const numberId = await client.getNumberId(chatId);
             if (numberId) {
                 const contact = await client.getContactById(numberId._serialized);
                 targetId = contact?.id?._serialized || numberId._serialized;
                 
-                let storeWaId = targetId;
+                storeWaId = targetId;
                 try {
                     const lidMap = await client.getContactLidAndPhone([targetId]);
                     if (lidMap && lidMap[0] && lidMap[0].lid) {
@@ -1342,7 +1345,11 @@ app.post('/api/whatsapp/send', async (req, res) => {
                     }
                 } catch(e) {}
 
-                db.run('UPDATE resultado SET wa_id = ? WHERE id = ?', [storeWaId, leadId]);
+                // Update wa_id, and also set to 'sent' if pending/error (or just sent anyway so it moves forward)
+                db.run(
+                    `UPDATE resultado SET wa_id = ?, campaign_status = CASE WHEN campaign_status = 'pending' OR campaign_status IS NULL THEN 'sent' ELSE campaign_status END, last_contacted = ? WHERE id = ?`, 
+                    [storeWaId, new Date().toISOString(), leadId]
+                );
             }
         }
         await client.sendMessage(targetId, message);

@@ -516,8 +516,8 @@ const App: React.FC = () => {
     if (activeTab === 'logs') {
         fetchLogs();
     }
-    if (activeTab === 'import') {
-        fetchImports();
+    if (activeTab === 'import' || activeTab === 'dashboard') {
+        if (activeTab === 'import') fetchImports();
         fetchCompanies();
     }
   }, 3000);
@@ -1653,12 +1653,19 @@ const App: React.FC = () => {
                             <div className="p-3 bg-[#f0f2f5] flex items-center gap-3 z-10 relative">
                                 <button className="p-2 text-slate-500 hover:text-slate-700"><Smile size={24}/></button>
                                 <div className="flex-1 relative">
-                                    <input 
-                                        className="w-full bg-white border border-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-brand-300 text-slate-800 shadow-sm"
+                                    <textarea 
+                                        className="w-full bg-white border border-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-brand-300 text-slate-800 shadow-sm resize-none custom-scrollbar"
                                         placeholder="Digite uma mensagem..."
                                         value={newMessage}
+                                        rows={2}
                                         onChange={e => setNewMessage(e.target.value)}
-                                        onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                                        onKeyDown={(e) => {
+                                            // Se o usuário quiser enviar pelo teclado, ele pode usar Ctrl+Enter
+                                            if (e.key === 'Enter' && e.ctrlKey) {
+                                                e.preventDefault();
+                                                handleSendMessage();
+                                            }
+                                        }}
                                     />
                                 </div>
                                 <button onClick={handleSendMessage} className="p-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg transition-colors">

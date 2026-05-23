@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { ReactFlow, Controls, Background, addEdge, BackgroundVariant, applyNodeChanges, applyEdgeChanges, Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
+import { ReactFlow, Controls, Background, addEdge, BackgroundVariant, applyNodeChanges, applyEdgeChanges, Handle, Position, useUpdateNodeInternals, NodeResizer } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { X, Save, MessageCircle, Clock, List, FileText, Image, Mic, Bot, Upload, CheckCircle } from 'lucide-react';
 
@@ -13,7 +13,7 @@ const nodeTypesConfig = [
   { type: 'ticket', label: 'Ticket', icon: FileText, color: 'border-indigo-400 bg-indigo-50 text-indigo-700' }
 ];
 
-const FlowNode = ({ id, data, type, isConnectable }: any) => {
+const FlowNode = ({ id, data, type, isConnectable, selected }: any) => {
     const config = nodeTypesConfig.find(c => c.type === type) || nodeTypesConfig[0];
     const Icon = config.icon;
     const hasOptions = type === 'menu' || type === 'ai';
@@ -26,7 +26,8 @@ const FlowNode = ({ id, data, type, isConnectable }: any) => {
 
     
     return (
-        <div className={`shadow-sm rounded-lg bg-white border border-slate-300 ${config.color.split(' ')[0]} min-w-[140px] max-w-[170px] text-slate-800`}>
+        <div className={`shadow-sm rounded-lg bg-white border border-slate-300 ${config.color.split(' ')[0]} min-w-[140px] w-full h-full text-slate-800 relative`}>
+            <NodeResizer minWidth={140} isVisible={selected} handleStyle={{ width: 6, height: 6 }} />
             <Handle type="target" position={Position.Top} isConnectable={isConnectable} className="w-1.5 h-1.5 border border-slate-300 bg-white" />
             <div className={`flex items-center gap-1.5 px-2 py-1 border-b border-slate-100 ${config.color.split(' ')[1]}`}>
                 <Icon size={10} className={config.color.split(' ')[2]} />
@@ -155,6 +156,23 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
         setEditingNode(null);
     };
 
+    const edgeColors = ['#94a3b8', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+    const handleEdgeClick = useCallback((_: any, edge: any) => {
+        setEdges(eds => eds.map(e => {
+            if (e.id === edge.id) {
+                const currentColor = e.style?.stroke || '#b1b1b7';
+                const nextIndex = (edgeColors.indexOf(currentColor) + 1) % edgeColors.length;
+                return { ...e, style: { ...e.style, stroke: edgeColors[nextIndex], strokeWidth: 3 } };
+            }
+            return e;
+        }));
+    }, [setEdges, edgeColors]);
+
+    const handleEdgeDoubleClick = useCallback((_: any, edge: any) => {
+        setEdges(eds => eds.filter(e => e.id !== edge.id));
+    }, [setEdges]);
+
     return (
         <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white w-full max-w-6xl h-[85vh] rounded-xl shadow-xl flex flex-col overflow-hidden">
@@ -205,6 +223,8 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
                         onEdgesChange={onEdgesChange}
                         onConnect={onConnect}
                         onNodeDoubleClick={handleNodeDoubleClick}
+                        onEdgeClick={handleEdgeClick}
+                        onEdgeDoubleClick={handleEdgeDoubleClick}
                         nodeTypes={nodeTypes}
                         fitView
                         className="bg-[#f8fafc]"
@@ -214,9 +234,19 @@ export const FlowEditorModal = ({ rule, onClose, onSave }: { rule: any, onClose:
                     </ReactFlow>
                     
                     {/* Dica de Uso */}
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-sm border border-slate-200 text-xs text-slate-500 font-medium flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></div>
-                        Clique duplo no nó para editar as informações
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-sm border border-slate-200 text-xs text-slate-500 font-medium flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></div>
+                            Clique duplo no nó para editar
+                        </div>
+                        <div className="w-px h-3 bg-slate-300"></div>
+                        <div className="flex items-center gap-2">
+                            Clique na linha para colorir
+                        </div>
+                        <div className="w-px h-3 bg-slate-300"></div>
+                        <div className="flex items-center gap-2">
+                            Clique duplo na linha para excluir
+                        </div>
                     </div>
                 </div>
             </div>
