@@ -103,9 +103,30 @@ const FilterInput = ({ placeholder, value, onChange }: any) => (
 
 // Tabela de Empresas Compactada
 const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi, onChat, onViewDetails, colFilters, setColFilters }: any) => {
-    
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 100;
+    const totalPages = Math.ceil(companies.length / itemsPerPage);
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const paginatedCompanies = companies.slice(startIndex, startIndex + itemsPerPage);
+
+    // Reset to page 1 when data changes significantly
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [companies.length]);
+
+    const ResizableTh = ({ title, minWidth, filterValue, onFilterChange, extraClasses = '' }: any) => (
+        <th className="font-semibold text-slate-600 align-top p-0">
+            <div className={`resize-x overflow-hidden px-4 py-2 min-w-[100px] h-full flex flex-col justify-start ${extraClasses}`} style={{ width: minWidth }}>
+                <div className="whitespace-nowrap overflow-hidden text-ellipsis mb-1">{title}</div>
+                {onFilterChange && setColFilters && (
+                    <FilterInput placeholder="Filtrar..." value={filterValue} onChange={onFilterChange} />
+                )}
+            </div>
+        </th>
+    );
+
     return (
-    <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex flex-col">
         <div className="overflow-auto max-h-[75vh]">
             <table className="w-full text-left border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50">
@@ -120,47 +141,20 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                                 />
                             </th>
                         )}
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[120px]">
-                            Inscrição
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.inscricao} onChange={(v: string) => setColFilters({...colFilters, inscricao: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
-                            CNPJ
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.cnpj} onChange={(v: string) => setColFilters({...colFilters, cnpj: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[200px]">
-                            Razão Social
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.razao} onChange={(v: string) => setColFilters({...colFilters, razao: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
-                            Telefone
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.telefone} onChange={(v: string) => setColFilters({...colFilters, telefone: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
-                            Município
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.municipio} onChange={(v: string) => setColFilters({...colFilters, municipio: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[120px]">
-                            Situação
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.situacao} onChange={(v: string) => setColFilters({...colFilters, situacao: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
-                            Forma de Pagamento
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.pagamento} onChange={(v: string) => setColFilters({...colFilters, pagamento: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[200px]">
-                            Motivo da Situação
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.motivo} onChange={(v: string) => setColFilters({...colFilters, motivo: v})} />}
-                        </th>
-                        <th className="px-4 py-2 font-semibold text-slate-600 align-top min-w-[140px]">
-                            Status Contato
-                            {setColFilters && <FilterInput placeholder="Filtrar..." value={colFilters?.statusContato} onChange={(v: string) => setColFilters({...colFilters, statusContato: v})} />}
-                        </th>
-                        {(onChat || onViewDetails || onToggleAi) && <th className="px-4 py-2 font-semibold text-slate-600 align-top w-20"></th>}
+                        <ResizableTh title="Inscrição" minWidth="140px" filterValue={colFilters?.inscricao} onFilterChange={(v: string) => setColFilters({...colFilters, inscricao: v})} />
+                        <ResizableTh title="CNPJ" minWidth="160px" filterValue={colFilters?.cnpj} onFilterChange={(v: string) => setColFilters({...colFilters, cnpj: v})} />
+                        <ResizableTh title="Razão Social" minWidth="260px" filterValue={colFilters?.razao} onFilterChange={(v: string) => setColFilters({...colFilters, razao: v})} />
+                        <ResizableTh title="Telefone" minWidth="160px" filterValue={colFilters?.telefone} onFilterChange={(v: string) => setColFilters({...colFilters, telefone: v})} />
+                        <ResizableTh title="Município" minWidth="160px" filterValue={colFilters?.municipio} onFilterChange={(v: string) => setColFilters({...colFilters, municipio: v})} />
+                        <ResizableTh title="Situação" minWidth="140px" filterValue={colFilters?.situacao} onFilterChange={(v: string) => setColFilters({...colFilters, situacao: v})} />
+                        <ResizableTh title="Forma de Pagamento" minWidth="180px" filterValue={colFilters?.pagamento} onFilterChange={(v: string) => setColFilters({...colFilters, pagamento: v})} />
+                        <ResizableTh title="Motivo da Situação" minWidth="220px" filterValue={colFilters?.motivo} onFilterChange={(v: string) => setColFilters({...colFilters, motivo: v})} />
+                        <ResizableTh title="Status Contato" minWidth="160px" filterValue={colFilters?.statusContato} onFilterChange={(v: string) => setColFilters({...colFilters, statusContato: v})} />
+                        {(onChat || onViewDetails || onToggleAi) && <th className="px-4 py-2 font-semibold text-slate-600 align-top w-20 border-l border-slate-100"></th>}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                    {companies.slice(0, 100).map((lead: CompanyResult) => (
+                    {paginatedCompanies.map((lead: CompanyResult) => (
                         <tr key={lead.id} className={`hover:bg-slate-50 transition-colors ${selectedIds?.has(lead.id) ? 'bg-slate-50' : ''}`}>
                             {selectable && (
                                 <td className="px-4 py-3 text-center">
@@ -175,7 +169,7 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                             <td className="px-4 py-3 font-mono text-slate-700">{lead.inscricaoEstadual}</td>
                             <td className="px-4 py-3 font-mono text-slate-700">{lead.cnpj}</td>
                             <td className="px-4 py-3">
-                                <p className="font-medium text-slate-900 truncate max-w-[200px]" title={lead.razaoSocial}>{lead.razaoSocial}</p>
+                                <p className="font-medium text-slate-900 truncate max-w-[240px]" title={lead.razaoSocial}>{lead.razaoSocial}</p>
                             </td>
                             <td className="px-4 py-3 text-slate-700">{lead.telefone || '-'}</td>
                             <td className="px-4 py-3 text-slate-700">{lead.municipio}</td>
@@ -238,12 +232,36 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                     ))}
                     {companies.length === 0 && (
                         <tr>
-                            <td colSpan={10} className="px-6 py-8 text-center text-slate-500">Nenhum registro encontrado.</td>
+                            <td colSpan={11} className="px-6 py-8 text-center text-slate-500">Nenhum registro encontrado.</td>
                         </tr>
                     )}
                 </tbody>
             </table>
         </div>
+        {totalPages > 1 && (
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                <span className="text-sm text-slate-500">
+                    Mostrando {startIndex + 1} a {Math.min(startIndex + itemsPerPage, companies.length)} de {companies.length}
+                </span>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1 bg-white border border-slate-300 rounded text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Anterior
+                    </button>
+                    <span className="text-sm text-slate-600 font-medium">Página {currentPage} de {totalPages}</span>
+                    <button 
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1 bg-white border border-slate-300 rounded text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Próxima
+                    </button>
+                </div>
+            </div>
+        )}
     </div>
     );
 };
@@ -252,10 +270,11 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
 interface KanbanCardProps {
     company: CompanyResult;
     onClick: () => void;
+    onDragStart: (e: React.DragEvent) => void;
 }
 
-const KanbanCard: React.FC<KanbanCardProps> = ({ company, onClick }) => (
-    <div onClick={onClick} className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 hover:border-brand-400 hover:shadow-md transition-all cursor-pointer mb-3 relative overflow-hidden group">
+const KanbanCard: React.FC<KanbanCardProps> = ({ company, onClick, onDragStart }) => (
+    <div draggable onDragStart={onDragStart} onClick={onClick} className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 hover:border-brand-400 hover:shadow-md transition-all cursor-pointer mb-3 relative overflow-hidden group">
         <div className="flex justify-between items-start mb-3">
             <h4 className="font-semibold text-slate-900 text-sm leading-snug line-clamp-2 group-hover:text-brand-600 transition-colors pr-6">
                 {company.razaoSocial}
@@ -806,6 +825,52 @@ const App: React.FC = () => {
       return <LoginScreen onLogin={handleLogin} />;
   }
 
+  // ── Kanban Drag & Drop ──────────────────────────────────────────────────
+  const kanbanStatuses = [
+      { id: 'pending', label: 'Prospecção' },
+      { id: 'sent', label: 'Contatados' },
+      { id: 'replied', label: 'Engajamento' },
+      { id: 'interested', label: 'Quentes' },
+      { id: 'not_interested', label: 'Perdidos' }
+  ];
+
+  const getColCompanies = (statusId: string) => {
+      return companies.filter(c => {
+          if (statusId === 'pending') return !c.campaignStatus || c.campaignStatus === 'pending';
+          if (statusId === 'sent') return ['sent', 'delivered', 'read'].includes(c.campaignStatus);
+          if (statusId === 'replied') return ['replied', 'flow_active', 'flow_finished'].includes(c.campaignStatus);
+          if (statusId === 'not_interested') return ['not_interested', 'error'].includes(c.campaignStatus);
+          return c.campaignStatus === statusId;
+      });
+  };
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+      e.dataTransfer.setData('leadId', id);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetStatus: string) => {
+      e.preventDefault();
+      const leadId = e.dataTransfer.getData('leadId');
+      if (!leadId) return;
+
+      // Updating locally first for snappy UI response
+      setCompanies(prev => prev.map(c => c.id === leadId ? { ...c, campaignStatus: targetStatus } : c));
+
+      try {
+          await fetch('/api/leads/status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: leadId, status: targetStatus })
+          });
+      } catch (err) {
+          console.error(err);
+      }
+  };
+
   // --- Renderização ---
 
   return (
@@ -933,24 +998,36 @@ const App: React.FC = () => {
                       <h2 className="text-xl font-semibold text-slate-800">Funil de Vendas (Kanban)</h2>
                   </div>
                   <div className="h-[600px] flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
-                      {['pending', 'sent', 'replied', 'interested', 'not_interested'].map((status) => (
-                          <div key={status} className="w-[320px] shrink-0 flex flex-col h-full bg-slate-100 rounded-lg p-3">
+                      {kanbanStatuses.map(({ id: status, label }) => {
+                          const colCompanies = getColCompanies(status);
+                          return (
+                          <div 
+                              key={status} 
+                              className="w-[320px] shrink-0 flex flex-col h-full bg-slate-100 rounded-lg p-3 transition-colors border border-transparent"
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => handleDrop(e, status)}
+                          >
                               <div className="flex justify-between items-center mb-4 px-1 text-slate-700">
                                   <h3 className="font-semibold text-sm flex items-center gap-2">
                                       <div className={`w-2 h-2 rounded-full ${status === 'pending' ? 'bg-slate-400' : status === 'interested' ? 'bg-emerald-500' : 'bg-brand-500'}`}></div>
-                                      {status === 'pending' ? 'Prospecção' : status === 'sent' ? 'Contatados' : status === 'replied' ? 'Engajamento' : status === 'interested' ? 'Quentes' : 'Perdidos'}
+                                      {label}
                                   </h3>
                                   <span className="bg-slate-200 px-2 py-0.5 rounded text-xs font-medium">
-                                      {companies.filter(c => c.campaignStatus === status).length}
+                                      {colCompanies.length}
                                   </span>
                               </div>
                               <div className="flex-1 space-y-3 overflow-y-auto custom-scrollbar">
-                                  {companies.filter(c => c.campaignStatus === status).map(lead => (
-                                      <KanbanCard key={lead.id} company={lead} onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || (lead.telefone?.replace(/\D/g, '') + '@c.us')); }} />
+                                  {colCompanies.map((lead: CompanyResult) => (
+                                      <KanbanCard 
+                                          key={lead.id} 
+                                          company={lead} 
+                                          onClick={() => { setActiveTab('whatsapp'); setActiveChat(lead.wa_id || (lead.telefone?.replace(/\D/g, '') + '@c.us')); }} 
+                                          onDragStart={(e) => handleDragStart(e, lead.id)}
+                                      />
                                   ))}
                               </div>
                           </div>
-                      ))}
+                      )})}
                   </div>
               </div>
             </div>
