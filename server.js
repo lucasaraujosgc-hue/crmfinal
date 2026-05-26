@@ -858,6 +858,13 @@ async function processPDFAndScrape(filepath, processId, filename) {
     db.run("UPDATE consulta SET total = ? WHERE id = ?", [uniqueIEs.length, processId]);
     logSystem('info', 'scraper', `Encontradas ${uniqueIEs.length} IEs únicas. Iniciando scraping...`);
 
+    for (const ie of uniqueIEs) {
+        const existing = betterDb.prepare(`SELECT 1 FROM resultado WHERE consulta_id = ? AND inscricao_estadual = ?`).get(processId, ie);
+        if (!existing) {
+            betterDb.prepare(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Aguardando')`).run(processId, ie);
+        }
+    }
+
     let browser;
     try {
         browser = await puppeteer.launch({
@@ -867,7 +874,19 @@ async function processPDFAndScrape(filepath, processId, filename) {
         const page = await browser.newPage();
         
         for (let i = 0; i < uniqueIEs.length; i++) {
+            const st = betterDb.prepare("SELECT status FROM consulta WHERE id = ?").get(processId);
+            if (st && st.status === 'paused') {
+                logSystem('info', 'scraper', `Processamento pausado para base: ${processId}`);
+                break;
+            }
+
             const ie = uniqueIEs[i];
+            
+            const r = betterDb.prepare("SELECT status FROM resultado WHERE consulta_id = ? AND inscricao_estadual = ?").get(processId, ie);
+            if (r && r.status !== 'Aguardando' && !r.status.startsWith('Erro')) {
+                continue;
+            }
+
             logSystem('info', 'scraper', `Consultando IE ${i+1}/${uniqueIEs.length}: ${ie}`);
             
             try {
@@ -941,27 +960,31 @@ async function processPDFAndScrape(filepath, processId, filename) {
                 });
 
                 if (razaoSocial) {
-                    db.run(`INSERT INTO resultado 
-                    (consulta_id, inscricao_estadual, cnpj, razao_social, nome_fantasia, unidade_fiscalizacao, municipio, uf, cep, bairro_distrito, logradouro, telefone, email, 
-                    atividade_economica_principal, condicao, forma_pagamento, situacao_cadastral, data_situacao_cadastral, motivo_situacao_cadastral, nome_contador, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sucesso')`,
-                     [processId, ie, cnpj, razaoSocial, nomeFantasia, unidadeFiscalizacao, municipio, uf, cep, bairroDistrito, logradouro, telefone, email, atividade, condicao, formaPagamento, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador]);
+                    db.run(`UPDATE resultado SET 
+                    cnpj = ?, razao_social = ?, nome_fantasia = ?, unidade_fiscalizacao = ?, municipio = ?, uf = ?, cep = ?, bairro_distrito = ?, logradouro = ?, telefone = ?, email = ?, 
+                    atividade_economica_principal = ?, condicao = ?, forma_pagamento = ?, situacao_cadastral = ?, data_situacao_cadastral = ?, motivo_situacao_cadastral = ?, nome_contador = ?, status = 'Sucesso' 
+                    WHERE consulta_id = ? AND inscricao_estadual = ?`,
+                     [cnpj, razaoSocial, nomeFantasia, unidadeFiscalizacao, municipio, uf, cep, bairroDistrito, logradouro, telefone, email, atividade, condicao, formaPagamento, situacaoCadastral, dataSituacaoCadastral, motivoSituacao, nomeContador, processId, ie]);
                 } else {
-                    db.run(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Não encontrado')`, [processId, ie]);
+                    db.run(`UPDATE resultado SET status = 'Erro: Não encontrado' WHERE consulta_id = ? AND inscricao_estadual = ?`, [processId, ie]);
                 }
 
             } catch (err) {
                 logSystem('error', 'scraper', `Falha ao processar IE ${ie}`, { error: err.message });
-                db.run(`INSERT INTO resultado (consulta_id, inscricao_estadual, status) VALUES (?, ?, 'Erro: Falha Navegação')`, [processId, ie]);
+                db.run(`UPDATE resultado SET status = 'Erro: Falha Navegação' WHERE consulta_id = ? AND inscricao_estadual = ?`, [processId, ie]);
             }
             
-            db.run("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, processId]);
+            const processedCount = betterDb.prepare("SELECT COUNT(*) as count FROM resultado WHERE consulta_id = ? AND status != 'Aguardando'").get(processId).count;
+            db.run("UPDATE consulta SET processed = ? WHERE id = ?", [processedCount, processId]);
         }
     } catch (e) {
         logSystem('error', 'scraper', `Erro fatal no browser Puppeteer`, { error: e.message });
     } finally {
         if (browser) await browser.close();
-        db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
+        const st = betterDb.prepare("SELECT status FROM consulta WHERE id = ?").get(processId);
+        if (st && st.status !== 'paused') {
+            db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), processId]);
+        }
         logSystem('info', 'scraper', `Processamento finalizado para: ${filename}`);
     }
 }
@@ -1026,6 +1049,26 @@ app.get('/get-imports', (req, res) => {
     });
 });
 
+app.post('/api/imports/:id/pause', (req, res) => {
+    db.run("UPDATE consulta SET status = 'paused' WHERE id = ?", [req.params.id], () => {
+        res.json({ success: true, message: 'Processo pausado' });
+    });
+});
+
+app.post('/api/imports/:id/resume', (req, res) => {
+    const consultaId = req.params.id;
+    db.all("SELECT inscricao_estadual FROM resultado WHERE consulta_id = ?", [consultaId], (err, rows) => {
+        if (err || !rows || rows.length === 0) return res.status(404).json({ error: 'Nenhum lead encontrado para essa base' });
+        
+        const uniqueIEs = [...new Set(rows.map(r => r.inscricao_estadual))];
+        db.run("UPDATE consulta SET status = 'processing' WHERE id = ?", [consultaId]);
+        
+        res.json({ success: true, message: 'Processo de atualização inciado' });
+        
+        reProcessConsulta(consultaId, uniqueIEs);
+    });
+});
+
 app.post('/api/imports/:id/refresh', (req, res) => {
     const consultaId = req.params.id;
     db.all("SELECT inscricao_estadual FROM resultado WHERE consulta_id = ?", [consultaId], (err, rows) => {
@@ -1051,7 +1094,19 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
         const page = await browser.newPage();
         
         for (let i = 0; i < uniqueIEs.length; i++) {
+            const st = betterDb.prepare("SELECT status FROM consulta WHERE id = ?").get(consultaId);
+            if (st && st.status === 'paused') {
+                logSystem('info', 'scraper', `Atualização pausada para base: ${consultaId}`);
+                break;
+            }
+
             const ie = uniqueIEs[i];
+            
+            const r = betterDb.prepare("SELECT status FROM resultado WHERE consulta_id = ? AND inscricao_estadual = ?").get(consultaId, ie);
+            if (r && r.status !== 'Aguardando' && !r.status.startsWith('Erro')) {
+                continue;
+            }
+
             logSystem('info', 'scraper', `Re-consultando IE ${i+1}/${uniqueIEs.length}: ${ie}`);
             
             try {
@@ -1138,13 +1193,17 @@ async function reProcessConsulta(consultaId, uniqueIEs) {
                 db.run(`UPDATE resultado SET status = 'Erro: Falha Navegação' WHERE consulta_id = ? AND inscricao_estadual = ?`, [consultaId, ie]);
             }
             
-            db.run("UPDATE consulta SET processed = ? WHERE id = ?", [i + 1, consultaId]);
+            const processedCount = betterDb.prepare("SELECT COUNT(*) as count FROM resultado WHERE consulta_id = ? AND status != 'Aguardando'").get(consultaId).count;
+            db.run("UPDATE consulta SET processed = ? WHERE id = ?", [processedCount, consultaId]);
         }
     } catch (e) {
         logSystem('error', 'scraper', `Erro fatal no browser Puppeteer (ReScrape)`, { error: e.message });
     } finally {
         if (browser) await browser.close();
-        db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), consultaId]);
+        const st = betterDb.prepare("SELECT status FROM consulta WHERE id = ?").get(consultaId);
+        if (st && st.status !== 'paused') {
+            db.run("UPDATE consulta SET status = 'completed', end_time = ? WHERE id = ?", [new Date().toISOString(), consultaId]);
+        }
         logSystem('info', 'scraper', `Atualização finalizada para base: ${consultaId}`);
     }
 }

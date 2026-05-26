@@ -4,7 +4,7 @@ import {
   CheckCircle2, AlertCircle, Send, RefreshCw, BookOpen, Plus, Trash2,
   User, X, Rocket, Edit,
   Smile, Check, Cpu, Terminal,
-  Activity, ArrowLeft, ArrowRight, Play, Clock, ScrollText, QrCode, Calculator
+  Activity, ArrowLeft, ArrowRight, Play, Pause, Clock, ScrollText, QrCode, Calculator
 } from 'lucide-react';
 import { CompanyResult, Status, KnowledgeRule, AIConfig, WhatsAppSession, ImportBatch } from './types';
 import { DEFAULT_AI_PERSONA } from './constants';
@@ -101,6 +101,17 @@ const FilterInput = ({ placeholder, value, onChange }: any) => (
     </div>
 );
 
+const ResizableTh = ({ title, minWidth, filterValue, onFilterChange, extraClasses = '', showFilter }: any) => (
+    <th className="font-semibold text-slate-600 align-top p-0">
+        <div className={`resize-x overflow-hidden px-4 py-2 h-full flex flex-col justify-start ${extraClasses}`} style={{ minWidth, width: minWidth }}>
+            <div className="whitespace-nowrap overflow-hidden text-ellipsis mb-1">{title}</div>
+            {showFilter && (
+                <FilterInput placeholder="Filtrar..." value={filterValue} onChange={onFilterChange} />
+            )}
+        </div>
+    </th>
+);
+
 // Tabela de Empresas Compactada
 const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll, selectable = false, onToggleAi, onChat, onViewDetails, colFilters, setColFilters }: any) => {
     const [currentPage, setCurrentPage] = useState(1);
@@ -113,17 +124,6 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
     useEffect(() => {
         setCurrentPage(1);
     }, [companies.length]);
-
-    const ResizableTh = ({ title, minWidth, filterValue, onFilterChange, extraClasses = '' }: any) => (
-        <th className="font-semibold text-slate-600 align-top p-0">
-            <div className={`resize-x overflow-hidden px-4 py-2 min-w-[100px] h-full flex flex-col justify-start ${extraClasses}`} style={{ width: minWidth }}>
-                <div className="whitespace-nowrap overflow-hidden text-ellipsis mb-1">{title}</div>
-                {onFilterChange && setColFilters && (
-                    <FilterInput placeholder="Filtrar..." value={filterValue} onChange={onFilterChange} />
-                )}
-            </div>
-        </th>
-    );
 
     return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex flex-col">
@@ -141,15 +141,15 @@ const CompanyTable = ({ companies, selectedIds, toggleSelection, toggleSelectAll
                                 />
                             </th>
                         )}
-                        <ResizableTh title="Inscrição" minWidth="140px" filterValue={colFilters?.inscricao} onFilterChange={(v: string) => setColFilters({...colFilters, inscricao: v})} />
-                        <ResizableTh title="CNPJ" minWidth="160px" filterValue={colFilters?.cnpj} onFilterChange={(v: string) => setColFilters({...colFilters, cnpj: v})} />
-                        <ResizableTh title="Razão Social" minWidth="260px" filterValue={colFilters?.razao} onFilterChange={(v: string) => setColFilters({...colFilters, razao: v})} />
-                        <ResizableTh title="Telefone" minWidth="160px" filterValue={colFilters?.telefone} onFilterChange={(v: string) => setColFilters({...colFilters, telefone: v})} />
-                        <ResizableTh title="Município" minWidth="160px" filterValue={colFilters?.municipio} onFilterChange={(v: string) => setColFilters({...colFilters, municipio: v})} />
-                        <ResizableTh title="Situação" minWidth="140px" filterValue={colFilters?.situacao} onFilterChange={(v: string) => setColFilters({...colFilters, situacao: v})} />
-                        <ResizableTh title="Forma de Pagamento" minWidth="180px" filterValue={colFilters?.pagamento} onFilterChange={(v: string) => setColFilters({...colFilters, pagamento: v})} />
-                        <ResizableTh title="Motivo da Situação" minWidth="220px" filterValue={colFilters?.motivo} onFilterChange={(v: string) => setColFilters({...colFilters, motivo: v})} />
-                        <ResizableTh title="Status Contato" minWidth="160px" filterValue={colFilters?.statusContato} onFilterChange={(v: string) => setColFilters({...colFilters, statusContato: v})} />
+                        <ResizableTh title="Inscrição" minWidth="140px" filterValue={colFilters?.inscricao} onFilterChange={(v: string) => setColFilters({...colFilters, inscricao: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="CNPJ" minWidth="160px" filterValue={colFilters?.cnpj} onFilterChange={(v: string) => setColFilters({...colFilters, cnpj: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Razão Social" minWidth="260px" filterValue={colFilters?.razao} onFilterChange={(v: string) => setColFilters({...colFilters, razao: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Telefone" minWidth="160px" filterValue={colFilters?.telefone} onFilterChange={(v: string) => setColFilters({...colFilters, telefone: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Município" minWidth="160px" filterValue={colFilters?.municipio} onFilterChange={(v: string) => setColFilters({...colFilters, municipio: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Situação" minWidth="140px" filterValue={colFilters?.situacao} onFilterChange={(v: string) => setColFilters({...colFilters, situacao: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Forma de Pagamento" minWidth="180px" filterValue={colFilters?.pagamento} onFilterChange={(v: string) => setColFilters({...colFilters, pagamento: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Motivo da Situação" minWidth="220px" filterValue={colFilters?.motivo} onFilterChange={(v: string) => setColFilters({...colFilters, motivo: v})} showFilter={!!setColFilters} />
+                        <ResizableTh title="Status Contato" minWidth="160px" filterValue={colFilters?.statusContato} onFilterChange={(v: string) => setColFilters({...colFilters, statusContato: v})} showFilter={!!setColFilters} />
                         {(onChat || onViewDetails || onToggleAi) && <th className="px-4 py-2 font-semibold text-slate-600 align-top w-20 border-l border-slate-100"></th>}
                     </tr>
                 </thead>
@@ -1824,8 +1824,24 @@ const App: React.FC = () => {
                                             </div>
                                         </div>
                                     )}
-                                    <Badge variant={imp.status === 'completed' ? 'success' : imp.status === 'error' ? 'error' : 'warning'}>{imp.status.toUpperCase()}</Badge>
+                                    <Badge variant={imp.status === 'completed' ? 'success' : imp.status === 'error' ? 'error' : imp.status === 'paused' ? 'warning' : 'warning'}>{imp.status.toUpperCase()}</Badge>
                                     <div className="flex gap-1">
+                                        {(imp.status === 'processing' || imp.status === 'queued') && (
+                                            <button onClick={async () => {
+                                                await fetch(`/api/imports/${imp.id}/pause`, { method: 'POST' });
+                                                fetchImports();
+                                            }} className="p-2 text-slate-400 hover:text-amber-600 transition-colors rounded-md hover:bg-amber-50" title="Pausar Scraping">
+                                                <Pause size={16}/>
+                                            </button>
+                                        )}
+                                        {imp.status === 'paused' && (
+                                            <button onClick={async () => {
+                                                await fetch(`/api/imports/${imp.id}/resume`, { method: 'POST' });
+                                                fetchImports();
+                                            }} className="p-2 text-slate-400 hover:text-emerald-600 transition-colors rounded-md hover:bg-emerald-50" title="Retomar Scraping">
+                                                <Play size={16}/>
+                                            </button>
+                                        )}
                                         <button onClick={async () => {
                                             if (confirm("Deseja re-extrair os dados dessa lista na SEFAZ? O lead será mantido no histórico.")) {
                                                 await fetch(`/api/imports/${imp.id}/refresh`, { method: 'POST' });
